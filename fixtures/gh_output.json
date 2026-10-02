@@ -1,0 +1,768 @@
+{
+  "issue_linked_prs": {
+    "Launchmetrics/PLS-databricks#331": {
+      "closedByPullRequestsReferences": {
+        "nodes": []
+      },
+      "parent": null,
+      "subIssues": {
+        "nodes": [
+          {
+            "number": 332,
+            "state": "OPEN",
+            "title": "Replay an enrichment from the historical trigger",
+            "url": "https://github.com/Launchmetrics/PLS-databricks/issues/332"
+          }
+        ]
+      }
+    },
+    "Launchmetrics/PLS-databricks#332": {
+      "closedByPullRequestsReferences": {
+        "nodes": [
+          {
+            "number": 335,
+            "state": "OPEN",
+            "title": "feat: #332 replay one enrichment from the historical trigger",
+            "url": "https://github.com/Launchmetrics/PLS-databricks/pull/335"
+          }
+        ]
+      },
+      "parent": {
+        "number": 331,
+        "state": "OPEN",
+        "title": "Replay an enrichment from the historical trigger",
+        "url": "https://github.com/Launchmetrics/PLS-databricks/issues/331"
+      },
+      "subIssues": {
+        "nodes": []
+      }
+    }
+  },
+  "issue_view": {
+    "Launchmetrics/PLS-databricks#331": {
+      "comments": [
+        {
+          "author": {
+            "login": "albertvila"
+          },
+          "authorAssociation": "MEMBER",
+          "body": "## Orchestration plan — replay-an-enrichment-from-the-historical-trigger\n\n**Flow:** A — one shared worktree, one combined diff, one commit + one PR.\n**Tracker:** `github Launchmetrics/PLS-databricks#331` (this issue is the run's record).\n**Tickets in → items out: 1 → 1.** Excluded issues: none. This parent is the `spec` issue — it is the run's record and the worker's spec context, not an item.\n\n### Item\n\n| | |\n|---|---|\n| **id** | `#332` |\n| **title** | Replay an enrichment from the historical trigger |\n| **ticket** | `#332` |\n| **blockedBy** | none |\n| **risk** | high — real state and contract surface (PENDING queueing, change-feed checkpoint, recovery markers) |\n\n**File scope**\n\n```\nprojects/enrichments/prometheus_generic_trigger/\n  tasks/prometheus_historical_trigger.py          # cli() + run(), replay path\n  resources/prometheus_generic_trigger_jobs.yml   # run-now param, empty by default\n  tests/unit/test_prometheus_historical_trigger.py\n  tests/integration/test_historical_trigger.py\n  utils/contract_reader.py                        # only if reuse falls short\n```\n\n### Graph\n\nNone. Native `blockedBy` is empty and #332's `## Blocked by` says \"None (can start immediately)\" — the two sources agree.\n\n### Waves\n\n- **wave 1:** `#332`\n\n### Per-item notes\n\n- **High risk** — full adversarial review (every acceptance criterion verified in code), not a mechanical pass.\n- The job definition must carry the replay parameter **empty**; a defaulted value would turn the nightly run into a replay.\n- `utils/contract_reader.py` is in scope only as a fallback — `read_all_valid()` already reads enabled contracts *including ended ones*, which is exactly the replay's read, so reuse is preferred over a new method.\n- No reset, no push, no force-push. No acceptance criterion reaches outside this repo.\n\n### Models\n\nRole defaults, **no override** — worker + ponytail `openrouter/deepseek/deepseek-v4.1-flash`, code-review `openrouter/anthropic/claude-sonnet-5`.\n\n### End of run\n\nCombined-diff ponytail pass → commit + one PR (human approval gate) → `gh` comment on `#332`, no close, no label change.\n",
+          "createdAt": "2026-09-25T07:28:48Z",
+          "id": "IC_kwDORiN9lM8AAAABW2nFTw",
+          "includesCreatedEdit": false,
+          "isMinimized": false,
+          "minimizedReason": "",
+          "reactionGroups": [],
+          "url": "https://github.com/Launchmetrics/PLS-databricks/issues/331#issuecomment-5828625743",
+          "viewerDidAuthor": true
+        },
+        {
+          "author": {
+            "login": "albertvila"
+          },
+          "authorAssociation": "MEMBER",
+          "body": "## Run summary — replay an enrichment from the historical trigger\n\nOrchestrated run for this spec: one item, flow A (single shared PR). Manager thread `thr_hfd8bzq2iy`.\n\n| Item | Outcome | Worker | Review | Ponytail |\n|---|---|---|---|---|\n| #332 | done | `thr_szuc8vevh9` | clean on round 2 (`thr_zvgbvb64q` findings → fixed → `thr_rx3ggmuz3i` clean) | `thr_gn8sp77qpv`, findings adjudicated (see below) |\n\n**What shipped** (uncommitted until the PR gate): `--replay_enrichment` on the existing historical trigger, empty by default. A non-empty value takes a stateless replay path that reads the enrichment's enabled contracts (including ended, excluding disabled) via `ContractReader.read_all_valid()`, queues every in-scope document including already-populated ones, carries already-enriched out-of-scope brands in the payload, and never reads or saves the change-feed checkpoint, never consults or writes the PROCESSED marker, and never emits recovery. Unknown enrichment name fails the run; a registered enrichment with no enabled contracts queues nothing and succeeds. The saved job definition passes the parameter empty, so the nightly path is unchanged.\n\n**Verification**: `lm-pyconv check` exit 0; `pytest prometheus_generic_trigger/tests/` 219 passed, including the pre-existing nightly-path regression tests.\n\n**Ponytail pass findings, not applied in-run** (out of the pass's remit because the spec explicitly requests this coverage): the pass proposed deleting five replay unit tests that repeat scenarios also covered in the new integration tests. #331 *Testing Decisions* designates the unit seam with a mocked contract reader and mocked consolidation area as the coverage seam and lists those scenarios to cover, so the deletion is a spec-author call; a follow-up is recorded on the run. Two cosmetic notes (the `_initialize_enrichment` docstring no longer describes both modes, and one job comment says \"every in-scope document\" where print-skip and prerequisite gating still trim it) are recorded as follow-ups as well.\n\n**PR**: opened at the end of the run; this comment is not edited afterwards — the closing lines live in the PR body.\n",
+          "createdAt": "2026-09-25T08:15:51Z",
+          "id": "IC_kwDORiN9lM8AAAABW3J8aA",
+          "includesCreatedEdit": false,
+          "isMinimized": false,
+          "minimizedReason": "",
+          "reactionGroups": [],
+          "url": "https://github.com/Launchmetrics/PLS-databricks/issues/331#issuecomment-5829196904",
+          "viewerDidAuthor": true
+        }
+      ],
+      "createdAt": "2026-09-24T09:30:45Z",
+      "number": 331,
+      "title": "Replay an enrichment from the historical trigger",
+      "updatedAt": "2026-09-25T08:15:51Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/issues/331",
+      "labels": [
+        {
+          "id": "LA_kwDORiN9lM8AAAAC3c5GyQ",
+          "name": "spec",
+          "description": "Context and decisions; never implement directly — work its child tickets",
+          "color": "7057FF"
+        }
+      ]
+    },
+    "Launchmetrics/PLS-databricks#332": {
+      "comments": [
+        {
+          "author": {
+            "login": "albertvila"
+          },
+          "authorAssociation": "MEMBER",
+          "body": "Settled: **done** — the item is implemented, tests and lint are green, and review is clean.\n\n- Orchestration: replay-an-enrichment-from-the-historical-trigger (manager thread `thr_hfd8bzq2iy`)\n- Worker thread: `thr_szuc8vevh9`\n- Review threads: `thr_zvgbzvb64q` (round 1, findings), `thr_rx3ggmuz3i` (round 2, clean); ponytail: `thr_gn8sp77qpv`\n- Verification: `lm-pyconv check` exit 0, `pytest prometheus_generic_trigger/tests/` 219 passed.\n- PR: https://github.com/Launchmetrics/PLS-databricks/pull/335\n- Ponytail suggestion to delete five duplicated replay unit tests was deliberately not applied (it conflicts with the testing seam named in #331); tracked as a follow-up on the run.\n",
+          "createdAt": "2026-09-25T08:15:45Z",
+          "id": "IC_kwDORiN9lM8AAAABW3J22Q",
+          "includesCreatedEdit": true,
+          "isMinimized": false,
+          "minimizedReason": "",
+          "reactionGroups": [],
+          "url": "https://github.com/Launchmetrics/PLS-databricks/issues/332#issuecomment-5829195481",
+          "viewerDidAuthor": true
+        }
+      ],
+      "createdAt": "2026-09-24T09:36:05Z",
+      "number": 332,
+      "title": "Replay an enrichment from the historical trigger",
+      "updatedAt": "2026-09-25T08:38:33Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/issues/332",
+      "labels": [
+        {
+          "id": "LA_kwDORiN9lM8AAAAC3c5HnQ",
+          "name": "ticket",
+          "description": "Executable unit sliced from a spec; the grabbable unit of work",
+          "color": "C2E0C6"
+        }
+      ]
+    }
+  },
+  "me": "albertvila",
+  "pr_checks": {
+    "Launchmetrics/BIT-databricks#1933": [
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Update pull request",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Result",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (tikTok)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (kpis)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (youtube)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (copyright)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (dmr)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (voices)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (llm-monitoring)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (medias)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (onlineCrawler)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (socialmedia)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (documents)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Run sonarqube over sonar project properties (./documents/sonar-project.properties)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over dotnet projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over gradle projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Print all previous outputs",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Find Workflows",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Detect project scan types",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Run Gitleaks scanner",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "skipping",
+        "name": "DMR Integration tests",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "🔍 Result",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Unit tests",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "🔍 Changed directories",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/filecheck",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/filecheck/albert.vila",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/filecheck/albert.vila/b2e0a82b319fd17ced0fffca4b0c25aa0f10e925..c9bb9d6467093fe7c5e1dec3e336d60d9c35e721",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/projectCheck",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/projectCheck/albert.vila/b2e0a82b319fd17ced0fffca4b0c25aa0f10e925..c9bb9d6467093fe7c5e1dec3e336d60d9c35e721",
+        "state": "SUCCESS"
+      }
+    ],
+    "Launchmetrics/PLS-databricks#334": [
+      {
+        "bucket": "pass",
+        "name": "🔍 Unit Tests Result",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Result",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Update pull request",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Print all previous outputs",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over gradle projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over sonar project properties",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over dotnet projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (projects/enrichments)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (projects/integrations)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Unit tests (projects/enrichments) / Build and test",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "🔍 Changed directories",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Detect project scan types",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Run Gitleaks scanner",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Find Workflows",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/filecheck/albert.vila",
+        "state": "SUCCESS"
+      }
+    ],
+    "Launchmetrics/PLS-databricks#335": [
+      {
+        "bucket": "pass",
+        "name": "🔍 Unit Tests Result",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Unit tests (projects/enrichments) / Build and test",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "🔍 Changed directories",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Result",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Update pull request",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Print all previous outputs",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over dotnet projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over sonar project properties",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "skipping",
+        "name": "Run security pipeline / Run sonarqube over gradle projects",
+        "state": "SKIPPED"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (projects/integrations)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Validate (projects/enrichments)",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Detect project scan types",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Run security pipeline / Run Gitleaks scanner",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "Validate Databricks Workflows / Find Workflows",
+        "state": "SUCCESS"
+      },
+      {
+        "bucket": "pass",
+        "name": "lm-build/filecheck/albert.vila",
+        "state": "SUCCESS"
+      }
+    ]
+  },
+  "pr_review_threads": {
+    "Launchmetrics/BIT-databricks#1933": {
+      "reviewThreads": {
+        "nodes": [
+          {
+            "isResolved": false,
+            "comments": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "albertvila"
+                  },
+                  "body": "Yes, the full transition but It will be the other way around no? \n\nFrom v1->v3 and from v1-> v4.\n\n(it's true that we could do the other way around just while we are deploying the new version if we want to do one step at a time)\n\nThe event_percolation is the other way around because we introduced a newer version but we are still consolidating with the old one.\n\n"
+                }
+              ]
+            }
+          },
+          {
+            "isResolved": true,
+            "comments": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "miqueldoblado"
+                  },
+                  "body": "At first glance it confused me with the `pass_through` enrichment name. AI suggested me `_identity` but we have the same problem :) and also `_noop`/`_no-op` that maybe did not collision with anything."
+                }
+              ]
+            }
+          },
+          {
+            "isResolved": true,
+            "comments": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "albertvila"
+                  },
+                  "body": "yes, is to force to have all enrichments here to not miss anything by mistake"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Launchmetrics/PLS-databricks#334": {
+      "reviewThreads": {
+        "nodes": []
+      }
+    },
+    "Launchmetrics/PLS-databricks#335": {
+      "reviewThreads": {
+        "nodes": [
+          {
+            "isResolved": false,
+            "comments": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "launchmetrics-automation"
+                  },
+                  "body": "**[NIT]** **confidence 55%** - docstring doesn't mention the new `replay` behavior\n\n---\n\n**Why:** The docstring still describes only the nightly semantics (\"insert any not-yet-enriched ones\", always emit PROCESSED/RECOVERY_REQUIRED), but `replay=True` ignores done-state entirely and skips marker emission altogether. A future reader relying on the docstring could miss this significant behavior fork.\n\n---\n\n**Fix:** Add a line to the docstring noting that `replay=True` bypasses the done-state filter and returns before any marker is written."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "pr_view": {
+    "Launchmetrics/BIT-databricks#1933": {
+      "createdAt": "2026-07-22T06:47:20Z",
+      "headRefOid": "c9bb9d6467093fe7c5e1dec3e336d60d9c35e721",
+      "isDraft": true,
+      "mergeStateStatus": "DIRTY",
+      "number": 1933,
+      "reviewDecision": "REVIEW_REQUIRED",
+      "state": "OPEN",
+      "title": "refactor: RBT-763 separate enrichment parse from version migration",
+      "updatedAt": "2026-08-11T15:15:11Z",
+      "url": "https://github.com/Launchmetrics/BIT-databricks/pull/1933",
+      "headRefName": "m-feature-separate_adapt_from_migration-RBT-763",
+      "author": {
+        "login": "albertvila",
+        "name": "Albert Vila"
+      }
+    },
+    "Launchmetrics/PLS-databricks#334": {
+      "createdAt": "2026-09-25T07:27:47Z",
+      "headRefOid": "30e5b8ef8f3eedec754b64b7e7e957966f917973",
+      "isDraft": false,
+      "mergeStateStatus": "CLEAN",
+      "number": 334,
+      "reviewDecision": "APPROVED",
+      "state": "OPEN",
+      "title": "chore: FIRE-95364 bump lm-data-unification to 3.9.6",
+      "updatedAt": "2026-09-25T08:11:23Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/pull/334",
+      "headRefName": "m-chore-bump_lm_data_unification_3_9_6-FIRE-95364",
+      "author": {
+        "login": "albertvila",
+        "name": "Albert Vila"
+      }
+    },
+    "Launchmetrics/PLS-databricks#335": {
+      "createdAt": "2026-09-25T08:38:23Z",
+      "headRefOid": "e3f7b40e727afbf47332d889bc4688ec4fb1db49",
+      "isDraft": false,
+      "mergeStateStatus": "BLOCKED",
+      "number": 335,
+      "reviewDecision": "",
+      "state": "OPEN",
+      "title": "feat: #332 replay one enrichment from the historical trigger",
+      "updatedAt": "2026-09-28T13:55:57Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/pull/335",
+      "closingIssuesReferences": [
+        {
+          "number": 332,
+          "url": "https://github.com/Launchmetrics/PLS-databricks/issues/332",
+          "repository": {
+            "name": "PLS-databricks",
+            "owner": {
+              "login": "Launchmetrics"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "search_assignee": [
+    {
+      "commentsCount": 1,
+      "createdAt": "2026-09-24T09:36:05Z",
+      "number": 332,
+      "repository": {
+        "name": "PLS-databricks",
+        "nameWithOwner": "Launchmetrics/PLS-databricks"
+      },
+      "title": "Replay an enrichment from the historical trigger",
+      "updatedAt": "2026-09-25T08:38:33Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/issues/332"
+    },
+    {
+      "commentsCount": 2,
+      "createdAt": "2026-09-24T09:30:45Z",
+      "number": 331,
+      "repository": {
+        "name": "PLS-databricks",
+        "nameWithOwner": "Launchmetrics/PLS-databricks"
+      },
+      "title": "Replay an enrichment from the historical trigger",
+      "updatedAt": "2026-09-25T08:15:51Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/issues/331"
+    }
+  ],
+  "search_author": [
+    {
+      "author": {
+        "id": "MDQ6VXNlcjY4ODIwNg==",
+        "is_bot": false,
+        "login": "albertvila",
+        "type": "User",
+        "url": "https://github.com/albertvila"
+      },
+      "commentsCount": 5,
+      "createdAt": "2026-09-25T08:38:24Z",
+      "isDraft": false,
+      "number": 335,
+      "repository": {
+        "name": "PLS-databricks",
+        "nameWithOwner": "Launchmetrics/PLS-databricks"
+      },
+      "title": "feat: #332 replay one enrichment from the historical trigger",
+      "updatedAt": "2026-09-28T13:55:57Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/pull/335"
+    },
+    {
+      "author": {
+        "id": "MDQ6VXNlcjY4ODIwNg==",
+        "is_bot": false,
+        "login": "albertvila",
+        "type": "User",
+        "url": "https://github.com/albertvila"
+      },
+      "commentsCount": 1,
+      "createdAt": "2026-09-25T07:27:47Z",
+      "isDraft": false,
+      "number": 334,
+      "repository": {
+        "name": "PLS-databricks",
+        "nameWithOwner": "Launchmetrics/PLS-databricks"
+      },
+      "title": "chore: FIRE-95364 bump lm-data-unification to 3.9.6",
+      "updatedAt": "2026-09-25T08:11:23Z",
+      "url": "https://github.com/Launchmetrics/PLS-databricks/pull/334"
+    },
+    {
+      "author": {
+        "id": "MDQ6VXNlcjY4ODIwNg==",
+        "is_bot": false,
+        "login": "albertvila",
+        "type": "User",
+        "url": "https://github.com/albertvila"
+      },
+      "commentsCount": 1,
+      "createdAt": "2026-07-22T06:47:20Z",
+      "isDraft": true,
+      "number": 1933,
+      "repository": {
+        "name": "BIT-databricks",
+        "nameWithOwner": "Launchmetrics/BIT-databricks"
+      },
+      "title": "refactor: RBT-763 separate enrichment parse from version migration",
+      "updatedAt": "2026-08-11T15:15:11Z",
+      "url": "https://github.com/Launchmetrics/BIT-databricks/pull/1933"
+    }
+  ],
+  "search_review_requested": [
+    {
+      "author": {
+        "id": "MDM6Qm90NDk2OTkzMzM=",
+        "is_bot": false,
+        "login": "dependabot[bot]",
+        "type": "Bot",
+        "url": "https://github.com/apps/dependabot"
+      },
+      "commentsCount": 0,
+      "createdAt": "2026-09-28T22:03:35Z",
+      "isDraft": false,
+      "number": 2707,
+      "repository": {
+        "name": "BIT-microservices",
+        "nameWithOwner": "Launchmetrics/BIT-microservices"
+      },
+      "title": "build(deps): bump undici in /online/crawler/extractHtmlMetadata",
+      "updatedAt": "2026-09-28T22:03:37Z",
+      "url": "https://github.com/Launchmetrics/BIT-microservices/pull/2707"
+    },
+    {
+      "author": {
+        "id": "MDM6Qm90NDk2OTkzMzM=",
+        "is_bot": false,
+        "login": "dependabot[bot]",
+        "type": "Bot",
+        "url": "https://github.com/apps/dependabot"
+      },
+      "commentsCount": 0,
+      "createdAt": "2026-09-25T17:05:58Z",
+      "isDraft": false,
+      "number": 2032,
+      "repository": {
+        "name": "BIT-databricks",
+        "nameWithOwner": "Launchmetrics/BIT-databricks"
+      },
+      "title": "chore(deps): bump actions/checkout from 4 to 7 in the github-actions group",
+      "updatedAt": "2026-09-25T17:06:01Z",
+      "url": "https://github.com/Launchmetrics/BIT-databricks/pull/2032"
+    },
+    {
+      "author": {
+        "id": "MDM6Qm90NDk2OTkzMzM=",
+        "is_bot": false,
+        "login": "dependabot[bot]",
+        "type": "Bot",
+        "url": "https://github.com/apps/dependabot"
+      },
+      "commentsCount": 4,
+      "createdAt": "2026-06-14T08:28:17Z",
+      "isDraft": false,
+      "number": 2508,
+      "repository": {
+        "name": "BIT-microservices",
+        "nameWithOwner": "Launchmetrics/BIT-microservices"
+      },
+      "title": "build(deps): bump esbuild, @vitest/coverage-v8, tsx, serverless-esbuild, vite and vitest in /online/crawler/generateOnlineId",
+      "updatedAt": "2026-07-22T08:42:22Z",
+      "url": "https://github.com/Launchmetrics/BIT-microservices/pull/2508"
+    },
+    {
+      "author": {
+        "id": "MDQ6VXNlcjEzOTQ1MTQw",
+        "is_bot": false,
+        "login": "diegosanzv",
+        "type": "User",
+        "url": "https://github.com/diegosanzv"
+      },
+      "commentsCount": 0,
+      "createdAt": "2026-09-28T07:34:31Z",
+      "isDraft": false,
+      "number": 2703,
+      "repository": {
+        "name": "BIT-microservices",
+        "nameWithOwner": "Launchmetrics/BIT-microservices"
+      },
+      "title": "browserlessScrapper: iplement automatic pagination via rel=\"next\" for paginated articles",
+      "updatedAt": "2026-09-28T14:35:41Z",
+      "url": "https://github.com/Launchmetrics/BIT-microservices/pull/2703"
+    },
+    {
+      "author": {
+        "id": "U_kgDOCOCBEg",
+        "is_bot": false,
+        "login": "lm-qinfei",
+        "type": "User",
+        "url": "https://github.com/lm-qinfei"
+      },
+      "commentsCount": 1,
+      "createdAt": "2026-09-22T08:42:27Z",
+      "isDraft": false,
+      "number": 2018,
+      "repository": {
+        "name": "BIT-databricks",
+        "nameWithOwner": "Launchmetrics/BIT-databricks"
+      },
+      "title": "feat: BIT-6081 Dyzio historical backfill",
+      "updatedAt": "2026-09-24T05:00:10Z",
+      "url": "https://github.com/Launchmetrics/BIT-databricks/pull/2018",
+      "headRefName": "m-chore-bump_dyzio_1_4_2-BIT-6081"
+    },
+    {
+      "author": {
+        "id": "U_kgDOCOCAvg",
+        "is_bot": false,
+        "login": "stevecailaunchmetrics",
+        "type": "User",
+        "url": "https://github.com/stevecailaunchmetrics"
+      },
+      "commentsCount": 7,
+      "createdAt": "2026-09-22T03:22:44Z",
+      "isDraft": false,
+      "number": 2017,
+      "repository": {
+        "name": "BIT-databricks",
+        "nameWithOwner": "Launchmetrics/BIT-databricks"
+      },
+      "title": "feat: add celebrity to voice etl - BIT-6114 ",
+      "updatedAt": "2026-09-28T10:03:56Z",
+      "url": "https://github.com/Launchmetrics/BIT-databricks/pull/2017"
+    }
+  ]
+}
