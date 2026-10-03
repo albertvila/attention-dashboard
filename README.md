@@ -205,8 +205,8 @@ contains enough history for the reader to see what it missed.
 **Dashboard** (`dashboard.html`, served at `/` by `attention.py`) — the tiers,
 collapsed Mail/Snoozed/Acknowledged/Drafts/Recently closed folds, the
 `new` / `changed` / `dropped` marks, and the last-look timestamp
-(`gha.seenAt`). Loads `./attention.json` next to itself, or `?data=<url>` to
-render a static copy — `data=` mode also hides refresh and parking.
+(`gha.seenAt`). Reads `/api/queue` from the producer, or `?data=<url>` to render
+some other snapshot statically — `data=` mode also hides refresh and parking.
 
 The harness (dsh) plugin that renders the same snapshot in a sidebar panel lives
 outside this repo and is not published here; it reads `attention.json` per
