@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!--
+  Attention dashboard — the page the producer serves at /.
+
+  It renders the shared snapshot contract only: the same JSON `attention.py
+  --json` writes and other tools read. Every reader-side rule (change flags,
+  ghosts, folds, parking) comes from attention-view.js, so no attention rule
+  lives in this file.
+
+  Served by the producer (http://127.0.0.1:8765/).
+-->
+<html lang="en"><head><meta charset="utf-8"><title>Attention dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{color-scheme:light dark}
+body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#0d1117;color:#e6edf3}
+header{position:sticky;top:0;background:#161b22;border-bottom:1px solid #30363d;padding:12px 20px;display:flex;gap:12px;align-items:baseline}
+h1{font-size:15px;margin:0;font-weight:600}
+button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 12px;cursor:pointer;font:inherit}
+button:hover{background:#30363d}
+#stamp{color:#8b949e;font-size:12px}
+main{max-width:940px;margin:0 auto;padding:16px 20px 60px}
+section{margin:22px 0}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}
+.row{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid #30363d;border-radius:8px;background:#161b22;margin-bottom:6px}
+.chip{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:4px;background:#30363d;color:#c9d1d9}
+.chip.REVIEW{background:#1f6feb33;color:#79c0ff}
+.chip.REVIEWED{background:#58a6ff22;color:#79c0ff}
+.chip.MY{background:#23863633;color:#7ee787}
+.chip.ISSUE{background:#d2992233;color:#e3b341}
+.chip.JIRA{background:#8957e533;color:#d2a8ff}
+.chip.MAIL{background:#39c5cf22;color:#76e3ea}
+/* Always visible (a hover-only control is undiscoverable), but quiet until the
+   row is hovered. */
+.snooze{flex:0 0 auto}
+.snooze select,.snooze button{font:inherit;font-size:11px;background:transparent;color:#6e7681;border:1px solid transparent;border-radius:6px;padding:1px 6px;cursor:pointer}
+.row:hover .snooze select,.row:hover .snooze button{background:#21262d;color:#c9d1d9;border-color:#30363d}
+.wakeat{color:#6e7681;font-size:11px;margin-left:4px}
+.row.snoozed{opacity:.5}
+.help{margin:0;padding:0 0 0 18px;color:#8b949e;font-size:12.5px;max-width:940px}
+.help li{margin:5px 0}
+.body{flex:1;min-width:0}
+.title{font-weight:600}
+.title a{color:#e6edf3;text-decoration:none}
+.title a:hover{text-decoration:underline}
+.meta{color:#8b949e;font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+.avatar{width:16px;height:16px;border-radius:50%;vertical-align:-3px;margin-right:4px;background:#30363d}
+.author,.repo{color:#8b949e;text-decoration:none}
+.author:hover,.repo:hover{color:#e6edf3;text-decoration:underline}
+.jira{color:#79c0ff;text-decoration:none}
+.jira:hover{text-decoration:underline}
+.jira-line{margin-top:4px;font-size:12px;overflow-wrap:anywhere}
+.jira-type{color:#8b949e;margin-left:6px;font-size:11px}
+.jira-summary{color:#c9d1d9;margin-left:6px}
+.badge.wip{background:#d299221f;color:#e3b341;border-color:#d2992255}
+.labels{margin-top:4px}
+.fact{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;border:1px solid;margin-left:4px;vertical-align:1px}
+.fact.ok{color:#7ee787;border-color:#3fb95055;background:#3fb95011}
+.fact.bad{color:#ff7b72;border-color:#f8514955;background:#f8514911}
+.fact.warn{color:#e3b341;border-color:#d2992255;background:#d2992211}
+.fact.waiting{color:#8b949e;border-color:#8b949e55;background:#8b949e11}
+.gh-label{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;margin:0 4px 2px 0;border:1px solid #00000033}
+.children{margin-top:6px;border-left:2px solid #30363d;padding-left:10px}
+.child{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px;flex-wrap:wrap}
+.child a{color:#8b949e;text-decoration:none}
+.child a:hover{color:#e6edf3;text-decoration:underline}
+.child .gh-label{font-size:9px;padding:0 6px}
+.child .fact{font-size:9px;padding:0 6px}
+.child-detail{color:#8b949e;font-size:11px}
+.chip.mini{font-size:9px;padding:1px 5px}
+.child-age{margin-left:auto;color:#6e7681;font-size:11px}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;margin-left:6px;border:1px solid transparent}
+.badge.needs{background:#f851491f;color:#ff7b72;border-color:#f8514955}
+.badge.ready{background:#3fb9501f;color:#7ee787;border-color:#3fb95055}
+.badge.waiting{background:#8b949e1f;color:#8b949e;border-color:#8b949e55}
+.badge.draft{background:#8b949e26;color:#c9d1d9;border-color:#8b949e88;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.row.draft{border-style:dashed;opacity:.72}
+.row.draft:hover{opacity:1}
+/* Change is a row-level, transient fact: a coloured edge plus plain meta text,
+   never another chip next to the item's own states and facts. */
+.row.chg-new{border-left:3px solid #3fb950}
+.row.chg-moved{border-left:3px solid #d29922}
+.row.chg-moved.out{border-left-color:#3fb950}
+.chg.moved.out{color:#7ee787}
+.row.chg-gone{border-left:3px solid #6e7681;opacity:.5}
+.row.chg-gone .title a{text-decoration:line-through}
+.chg{font-weight:600}
+.chg.new{color:#7ee787}
+.chg.moved{color:#e3b341}
+.chg.moved.out{color:#7ee787}
+.chg.gone{color:#8b949e}
+details.fold{margin:0 0 8px}
+details.fold summary{cursor:pointer;font-size:12px;color:#8b949e;padding:6px 10px;border:1px dashed #30363d;border-radius:8px;background:#161b22;list-style-position:inside}
+details.fold[open] summary{margin-bottom:6px}
+.age{flex:0 0 auto;color:#8b949e;font-size:12px}
+.empty{color:#6e7681;font-size:13px;padding:4px 2px}
+.hidden{color:#8b949e;font-size:12px;margin-top:6px}
+.err{border:1px solid #f85149;border-radius:8px;background:#f8514911;padding:10px 12px;margin-bottom:8px}
+.err b{color:#ff7b72}
+pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;color:#c9d1d9;max-height:180px;overflow:auto}
+</style></head><body>
+<header><h1>Attention</h1><button id="refresh">Refresh</button><span id="stamp">loading…</span></header>
+<main id="app"></main>
+<script src="attention-view.js"></script>
+<script>
+const app = document.getElementById('app');
+const stamp = document.getElementById('stamp');
+/* The rules live in attention-view.js, shared with the dsh panel: this page
+   only renders what the overlay hands it. */
+const SEEN_KEY = 'gha.seenAt';
+let seenAt = null;
+try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
+let snoozes = {}, acks = {}, status = null, view = null;
+
+async function load(isRefresh){
+  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
+  try{
+    const res = await fetch(isRefresh ? '/refresh' : '/api/queue', {cache:'no-store'});
+    const data = await res.json();
+    const [snaps, acksRes, statusRes] = await Promise.all([
+      fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'})]);
+    snoozes = await snaps.json().catch(() => ({}));
+    acks = await acksRes.json().catch(() => ({}));
+    status = await statusRes.json().catch(() => null);
+    view = AttentionView.overlay(data, {seenAt, snoozes, acks});
+    render(data);
+    stamp.textContent = 'snapshot ' + ageOf(data.generatedAt) + ' · ' + view.summaryText();
+    try { localStorage.setItem(SEEN_KEY, data.generatedAt); } catch(e) {}
+  }catch(e){
+    app.innerHTML = '';
+    app.appendChild(errBox({where:'page', command:'GET /api/queue', output:String(e)}));
+    stamp.textContent = 'error';
+  }
+}
+function render(data){
+  app.innerHTML = '';
+  const staleText = AttentionView.staleText(data, status);
+  if(staleText) app.appendChild(el('div','err', staleText));
+  for(const fold of [['Snoozed', view.folds.snoozed, 'wake one to bring it back'],
+                     ['Acknowledged', view.folds.acked, 'hidden until the card changes'],
+                     ['Drafts', view.folds.drafts, 'tests / POCs — collapsed by default'],
+                     ['Recently closed', view.folds.closed, 'last 24h']]){
+    if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
+  }
+  for(const tier of view.tiers){
+    const s = document.createElement('section');
+    const h = document.createElement('h2');
+    h.textContent = tier.title + ' · ' + tier.count;
+    s.appendChild(h);
+    if(!tier.rows.length){ s.appendChild(el('div','empty','Nothing here.')); }
+    for(const it of tier.rows) s.appendChild(row(it));
+    app.appendChild(s);
+  }
+  if(view.folds.mail.length) app.appendChild(foldBox('Mail', view.folds.mail, 'starred threads — collapsed by default'));
+  for(const e of data.errors) app.appendChild(errBox(e));
+  if(data.hidden_bots) app.appendChild(el('div','hidden','+'+data.hidden_bots+' hidden (bot-authored review requests)'));
+  app.appendChild(helpBox([
+    'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Mail fold instead of the tiers. Un-star one to clear it; nothing here changes your mail.',
+    'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, merged work whose ticket may still need closing). Waiting on others: you handed off (PRs awaiting review, tickets in progress or with support, mail you answered).',
+    'Grouping — two ways: a Jira key or GitHub ref links items into one card automatically (a merged PR stays with its ticket and lifts the card to Ready), and a group/<name> label merges threads that share nothing but the topic. The top line of a card is its most urgent member; the rest are children.',
+    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped (struck through, and hidden in Needs you now).',
+    'Parking — the picker on each card snoozes it (4 hours / 1 day / 3 days / 1 week) or acknowledges it (until it changes). Shared with the other dashboards; the snapshot itself is untouched.'
+  ]));
+}
+function foldBox(title, items, note){
+  const d = document.createElement('details');
+  d.className = 'fold';
+  const s = document.createElement('summary');
+  s.textContent = title + ' · ' + items.length + (note ? ' (' + note + ')' : '');
+  d.appendChild(s);
+  for(const it of items) d.appendChild(row(it));
+  return d;
+}
+async function park(key, value){
+  const acking = value === 'ack', unacking = value === 'unack';
+  const res = await fetch(acking || unacking ? '/acks' : '/snoozes', {
+    method: 'POST', headers: {'content-type': 'application/json'},
+    body: JSON.stringify(acking ? {key} : unacking ? {key, clear: true} : {key, hours: Number(value)})});
+  const stored = await res.json();
+  if(acking || unacking) acks = stored; else snoozes = stored;
+  load();
+}
+function parkControl(r){
+  const wrap = el('span','snooze');
+  const snoozeUntil = view.snoozeOf(r), ackedAt = view.ackOf(r);
+  if(snoozeUntil || ackedAt){
+    const b = el('button','wake', ackedAt ? 'unack' : 'wake');
+    b.onclick = () => park(r.key, ackedAt ? 'unack' : '0');
+    wrap.appendChild(b);
+    wrap.appendChild(el('span','wakeat', ackedAt ? 'until it changes' : view.formatWhen(snoozeUntil)));
+    return wrap;
+  }
+  const sel = document.createElement('select');
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = '⏰ snooze / ack';
+  sel.appendChild(ph);
+  for(const c of view.choices){
+    const o = document.createElement('option');
+    o.value = c.value; o.textContent = c.label;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { if(sel.value) park(r.key, sel.value); };
+  wrap.appendChild(sel);
+  return wrap;
+}
+const ageOf = iso => {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? Math.floor(s/60) + 'm ago'
+       : s < 86400 ? Math.floor(s/3600) + 'h ago' : Math.floor(s/86400) + 'd ago';
+};
+function chipClass(c){return c==='REVIEW'?'REVIEW':c==='ISSUE'?'ISSUE':c==='JIRA'?'JIRA':c==='MAIL'?'MAIL':c==='REVIEWED'?'REVIEWED':'MY';}
+function row(it){
+  const chg = view.flag(it);
+  const r = el('div','row' + (it.draft ? ' draft' : '') + view.changeClass(chg)
+                     + (view.parked(it) ? ' snoozed' : ''));
+  const chip = el('span','chip '+chipClass(it.chip), it.chip);
+  r.appendChild(chip);
+  const b = el('div','body');
+  const t = el('div','title');
+  const a = document.createElement('a');
+  a.href = it.url; a.target = '_blank'; a.rel='noreferrer'; a.textContent = it.title;
+  t.appendChild(a);
+  for(const st of it.states){ const bg = el('span','badge '+st.tier, st.label); t.appendChild(bg); }
+  if(it.draft) t.appendChild(el('span','badge draft','draft'));
+  b.appendChild(t);
+  const m = el('div','meta');
+  if(chg){
+    m.appendChild(el('span','chg ' + view.changeTone(chg), view.changeLabel(chg)));
+    m.appendChild(document.createTextNode(' · '));
+  }
+  if(it.author){
+    const img = document.createElement('img');
+    img.className='avatar'; img.loading='lazy'; img.alt=''; img.title='by '+it.author;
+    img.src='https://github.com/'+encodeURIComponent(it.author)+'.png?size=32';
+    m.appendChild(img);
+    const who = document.createElement('a');
+    who.className='author'; who.target='_blank'; who.rel='noreferrer'; who.textContent=it.author;
+    who.href='https://github.com/'+encodeURIComponent(it.author);
+    m.appendChild(who);
+    m.appendChild(document.createTextNode(' · '));
+  }
+  const refParts = it.ref.split('#');
+  if(it.container){
+    const repo = document.createElement('a');
+    repo.className='repo'; repo.target='_blank'; repo.rel='noreferrer';
+    repo.href='https://github.com/'+it.container; repo.textContent=refParts[0];
+    m.appendChild(repo);
+    m.appendChild(document.createTextNode('#'+refParts[1]));
+  }else{
+    m.appendChild(document.createTextNode(it.ref));
+  }
+  for(const f of (it.facts||[])) m.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
+  if(it.detail) m.appendChild(document.createTextNode(' · ' + it.detail));
+  b.appendChild(m);
+  if(it.jira){
+    const jr = el('div','jira-line');
+    const j = document.createElement('a');
+    j.className='jira'; j.href=it.jira; j.target='_blank'; j.rel='noreferrer';
+    j.textContent=it.jira.split('/').pop();
+    jr.appendChild(j);
+    if(it.jira_issue){
+      if(it.jira_issue.type) jr.appendChild(el('span','jira-type', it.jira_issue.type));
+      if(it.jira_issue.status){
+        const cat = (it.jira_issue.status_category||'').toLowerCase();
+        const t = cat==='done'?'ready':cat==='in progress'?'wip':'waiting';
+        jr.appendChild(el('span','badge '+t, it.jira_issue.status));
+      }
+      if(it.jira_issue.summary) jr.appendChild(el('span','jira-summary', it.jira_issue.summary));
+    }
+    b.appendChild(jr);
+  }
+  if(it.labels && it.labels.length){
+    const ls = el('div','labels');
+    for(const l of it.labels) ls.appendChild(labelChip(l));
+    b.appendChild(ls);
+  }
+  if(it.children && it.children.length){
+    const kids = el('div','children');
+    for(const c of it.children){
+      const k = el('div','child');
+      k.appendChild(el('span','chip mini '+chipClass(c.chip), c.chip));
+      const a = document.createElement('a');
+      a.href=c.url; a.target='_blank'; a.rel='noreferrer';
+      a.textContent = c.ref || c.title || '';
+      a.title = c.title || c.ref || '';
+      k.appendChild(a);
+      for(const st of c.states) k.appendChild(el('span','badge '+st.tier, st.label));
+      const cchg = view.flag(c);
+      if(cchg) k.appendChild(el('span','chg ' + view.changeTone(cchg), view.changeLabel(cchg)));
+      for(const f of (c.facts||[])) k.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
+      for(const l of (c.labels||[])) k.appendChild(labelChip(l));
+      if(c.detail) k.appendChild(el('span','child-detail', c.detail));
+      if(c.age) k.appendChild(el('span','child-age', c.age));
+      kids.appendChild(k);
+    }
+    b.appendChild(kids);
+  }
+  r.appendChild(b);
+  r.appendChild(el('div','age', it.age));
+  r.appendChild(parkControl(it));
+  return r;
+}
+function helpBox(lines){
+  const d = document.createElement('details');
+  d.className = 'fold';
+  const s = document.createElement('summary');
+  s.textContent = 'How this queue works';
+  d.appendChild(s);
+  const ul = document.createElement('ul');
+  ul.className = 'help';
+  for(const line of lines) ul.appendChild(el('li', null, line));
+  d.appendChild(ul);
+  return d;
+}
+function labelChip(l){
+  const hex = (l.color||'').replace('#','').padEnd(6,'0');
+  const r=parseInt(hex.slice(0,2),16)||0, g=parseInt(hex.slice(2,4),16)||0, bl=parseInt(hex.slice(4,6),16)||0;
+  const s = el('span','gh-label',l.name);
+  s.style.background='#'+hex;
+  s.style.color=(0.299*r+0.587*g+0.114*bl)>150?'#24292f':'#ffffff';
+  return s;
+}
+function errBox(e){
+  const d = el('div','err');
+  d.appendChild(el('div',null,e.where + ' — a call failed'));
+  if(e.command) d.appendChild(el('pre',null,e.command));
+  if(e.output) d.appendChild(el('pre',null,e.output));
+  return d;
+}
+function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n;}
+document.getElementById('refresh').onclick = () => load(true);
+load();
+</script></body></html>
+"
