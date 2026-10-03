@@ -6,13 +6,17 @@ Run:  python3 -m unittest -v test_cli_seam
 One recording drives a whole collection: every answer is keyed by the exact
 command recorded, so a per-card lookup on the wrong key raises instead of
 quietly answering nothing, and an unrecorded command can never read as an empty
-result. GitHub answers come from fixtures/gh_output.json; the twg (Jira) and
-gmcli (mail) answers are built here, since no live recording is committed.
+result. The closed-window searches are the one exception: the producer computes
+their `closed:>=` date from its own clock mid-run, so they key on the search
+they ask for with that date normalized (see key) — every other part of the
+search still has to match. GitHub answers come from fixtures/gh_output.json; the
+twg (Jira) and gmcli (mail) answers are built here, since no live recording is
+committed.
 """
 
 import json
+import re
 import unittest
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import attention
@@ -28,6 +32,23 @@ PR_VIEW = ("number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updat
            "headRefName,author,labels,closingIssuesReferences,body")
 ISSUE_VIEW = "number,title,url,body,updatedAt,createdAt,comments,labels"
 
+# A GraphQL `search(type: ISSUE)` query keys on the search it asks for, with its
+# `closed:>=` date normalized — the producer reads that date from its own clock.
+SEARCH = re.compile(r'search\(type: ISSUE.*?query: "([^"]*)"')
+CLOSED_DATE = re.compile(r"closed:>=\d{4}-\d{2}-\d{2}")
+CLOSED_ANY = "closed:>=<date>"
+
+
+def key(command, args):
+    """The recording's key for one invocation: exact args, except a search
+    query keys on its normalized search alone, so a different search still
+    raises."""
+    keys = []
+    for arg in args:
+        search = SEARCH.search(arg)
+        keys.append(CLOSED_DATE.sub(CLOSED_ANY, search.group(1)) if search else arg)
+    return (command, tuple(keys))
+
 
 class Recorded(attention.Cli):
     """The recorded adapter: text, JSON and GraphQL answer a recorded command
@@ -36,10 +57,10 @@ class Recorded(attention.Cli):
     replays through it unchanged."""
 
     def __init__(self, calls):
-        self.answers = {(c["command"][0], tuple(c["command"][1:])): c for c in calls}
+        self.answers = {key(c["command"][0], c["command"][1:]): c for c in calls}
 
     def text(self, command, args):
-        call = self.answers.get((command, tuple(args)))
+        call = self.answers.get(key(command, args))
         if call is None:
             raise LookupError(f"unrecorded command: {command} {' '.join(args)}")
         if call["returncode"] != 0:
@@ -72,24 +93,6 @@ def issue_links_query(owner, name, num):
             ' } } }')
 
 
-def closed_prs_query(qualifier, who, since):
-    return ('{ search(type: ISSUE, first: 100, query: "is:pr is:closed %s:%s closed:>=%s") { nodes { '
-            '... on PullRequest { number title url state closedAt headRefName createdAt updatedAt '
-            'author { login } labels(first:20) { nodes { name color } } repository { nameWithOwner } '
-            'closingIssuesReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
-            ) % (qualifier, who, since)
-
-
-def closed_issues_query(who, since):
-    return ('{ search(type: ISSUE, first: 100, query: "is:issue is:closed assignee:%s closed:>=%s") { nodes { '
-            '... on Issue { number title url body closedAt createdAt updatedAt '
-            'labels(first:20) { nodes { name color } } repository { nameWithOwner } '
-            'parent { number repository { nameWithOwner } } '
-            'subIssues(first:50) { nodes { number repository { nameWithOwner } } } '
-            'closedByPullRequestsReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
-            ) % (who, since)
-
-
 def jira_row(key, summary, status="In Progress", category="In Progress"):
     """One twg workitem row, with the fields the producer reads."""
     return {"key": key, "summary": summary,
@@ -120,8 +123,6 @@ def fixture_recording(drop=()):
 
     `drop` omits commands whose joined text contains an entry, so one run can
     show what a failing source — or one card's checks — does to the rest."""
-    since = (datetime.now(timezone.utc)
-             - timedelta(hours=attention.CLOSED_WINDOW_HOURS)).strftime("%Y-%m-%d")
     calls = [gh(["api", "user"], {"login": ME})]
 
     rows = FIXTURES["search_review_requested"]
@@ -172,12 +173,11 @@ def fixture_recording(drop=()):
                                   "--max", str(attention.MAIL_MAX), "--json"],
                         {"threads": [MAIL_THREAD]}))
     calls.append(answer("gmcli", [attention.MAIL_ACCOUNT, "labels", "list"], MAIL_LABELS))
-    calls.append(gh(["api", "graphql", "-f", "query=" + closed_prs_query("author", ME, since)],
-                    {"data": {"search": {"nodes": []}}}))
-    calls.append(gh(["api", "graphql", "-f", "query=" + closed_prs_query("reviewed-by", ME, since)],
-                    {"data": {"search": {"nodes": []}}}))
-    calls.append(gh(["api", "graphql", "-f", "query=" + closed_issues_query(ME, since)],
-                    {"data": {"search": {"nodes": []}}}))
+    for search in (f"is:pr is:closed author:{ME}", f"is:pr is:closed reviewed-by:{ME}",
+                   f"is:issue is:closed assignee:{ME}"):
+        calls.append(gh(["api", "graphql", "-f",
+                         f'query={{ search(type: ISSUE, query: "{search} {CLOSED_ANY}") }}'],
+                        {"data": {"search": {"nodes": []}}}))
     return [c for c in calls if not any(d in " ".join(c["command"]) for d in drop)]
 
 
