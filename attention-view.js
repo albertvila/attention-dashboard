@@ -35,6 +35,9 @@
     const gone = (data.changes || {}).gone || [];
 
     const isMail = row => row.chip === 'MAIL';
+    // A Jira card in Support Investigating is waiting in the snapshot, and
+    // folds out of the rendered queue at read time — like mail, not a tier.
+    const isSupport = row => (((row.states || [])[0] || {}).key) === 'with-support';
     const snoozeOf = row => (snoozes[row.key] && snoozes[row.key] > now) ? snoozes[row.key] : null;
     // An ack holds only while the card has not moved since you acknowledged it.
     const ackOf = row => {
@@ -42,14 +45,16 @@
       return (at && (!row.lastChangedAt || row.lastChangedAt <= at)) ? at : null;
     };
     const parked = row => !!(snoozeOf(row) || ackOf(row));
-    /** Renders in a tier: work that is neither mail (its own fold) nor parked. */
-    const work = row => !isMail(row) && !parked(row);
+    /** Renders in a tier: work that is neither mail (its own fold), support
+        (its own fold) nor parked. */
+    const work = row => !isMail(row) && !isSupport(row) && !parked(row);
 
     function ghosts(section) {
       // The Needs queue is for things you can act on; a struck-through card
       // there reads as "do I still owe this?".
       if (section === 'needs') return [];
-      return gone.filter(r => r.section === section && !isMail(r) && !parked(r) && since && r.goneAt > since);
+      return gone.filter(r => r.section === section && !isMail(r) && !isSupport(r)
+        && !parked(r) && since && r.goneAt > since);
     }
 
     const tiers = (data.tiers || []).map(t => {
@@ -61,9 +66,41 @@
       snoozed: rows.filter(r => snoozeOf(r)),
       acked: rows.filter(r => ackOf(r)),
       mail: rows.filter(r => isMail(r) && !parked(r)),
+      support: rows.filter(r => isSupport(r) && !parked(r)),
       drafts: (data.drafts || []).filter(work).concat(ghosts('drafts')),
       closed: (data.closed || []).filter(work).concat(ghosts('closed')),
     };
+
+    /** Fold summaries are built from the ages the producer already put on the
+        rows — never a second calculation. No updated time, no oldest clause. */
+    function oldestClause(rows) {
+      const timed = rows.filter(r => (r.times || {}).updated);
+      if (!timed.length) return '';
+      const oldest = timed.reduce((a, b) => (a.times.updated <= b.times.updated ? a : b));
+      return oldest.age ? 'oldest ' + oldest.age : '';
+    }
+
+    /** Why a collapsed fold is worth opening, one line per fold. */
+    const notes = {
+      mail: () => [oldestClause(folds.mail),
+        folds.mail.filter(r => (r.facts || []).some(f => f.label === 'unread')).length + ' unread'
+      ].filter(Boolean).join(' · '),
+      drafts: () => [folds.drafts.some(r => (r.states || []).some(s => s.key === 'conflicts')) ? 'conflicts' : '',
+        oldestClause(folds.drafts)
+      ].filter(Boolean).join(' · '),
+      support: () => oldestClause(folds.support),
+    };
+
+    /** When nothing needs you, name what you could pick up instead: only Ready,
+        and only a row — never a waiting card, never a fold. */
+    function nextCard() {
+      const inTier = key => (tiers.find(t => t.key === key) || { rows: [] }).rows;
+      if (inTier('needs').length) return null;
+      const next = inTier('ready')[0];
+      if (!next) return 'Nothing needs you.';
+      const state = (next.states || [])[0];
+      return 'Nothing needs you. Next: ' + (next.ref || next.title) + (state ? ' · ' + state.label : '');
+    }
 
     /** Counts describe what happened, not what is on screen: a parked card
         still counts as new/changed/dropped in the header line. */
@@ -97,7 +134,7 @@
     return {
       snoozeOf, ackOf, parked,
       flag: row => flagOf(row, since),
-      tiers, folds, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,
+      tiers, folds, notes, nextCard, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,
       /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
