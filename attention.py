@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
@@ -1193,6 +1194,16 @@ DASHBOARD = os.path.join(HERE, "dashboard.html")
 CONSUMER_JS = os.path.join(HERE, "attention-view.js")
 
 
+class Server(ThreadingHTTPServer):
+    """A reader that goes away mid-request — a page reload, a tab closed, a fetch
+    aborted during a ~20s refresh — is a dropped connection, not a stack trace on
+    the console. Everything else still reports as usual."""
+
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
+            super().handle_error(request, client_address)
+
+
 class Handler(BaseHTTPRequestHandler):
     """Reads are served from the cached snapshot (instant); only /refresh runs
     the producer. Every refresh rewrites the shared file, so file readers (the
@@ -1350,7 +1361,7 @@ def main():
             print(json.dumps(snapshot, ensure_ascii=False))
         return
     print(f"Attention queue on http://127.0.0.1:{args.port}  (Ctrl-C to stop)")
-    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    Server(("127.0.0.1", args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
