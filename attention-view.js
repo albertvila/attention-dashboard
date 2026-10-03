@@ -1,5 +1,5 @@
-/* attention-view.js — what a *reader* sees, shared verbatim by the POC page, the
-   prototype and the dsh panel.
+/* attention-view.js — what a *reader* sees, shared verbatim by the dashboard and
+   the dsh panel.
 
    The producer owns what is true (states, tiers, links, change stamps). This
    owns the layer on top of it: change flags since the reader's last look, ghosts
@@ -8,7 +8,7 @@
    window.AttentionView.
 
    Everything a surface needs to decide *where a card renders* and *what mark it
-   carries* lives here, so the three surfaces cannot drift apart again. */
+   carries* lives here, so the surfaces cannot drift apart again. */
 
 (function (global) {
   'use strict';
@@ -95,7 +95,7 @@
     const changeClass = f => !f ? '' : ' chg-' + changeTone(f);
 
     return {
-      since, isMail, snoozeOf, ackOf, parked, work, ghosts,
+      snoozeOf, ackOf, parked,
       flag: row => flagOf(row, since),
       tiers, folds, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,
       /** The five choices one control offers: hours, or "ack" (until it changes). */
