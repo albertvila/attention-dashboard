@@ -8,10 +8,12 @@ and the pure view-model seam. External behavior only: states, tiers, ordering,
 bot filtering + hidden count, and error passthrough.
 """
 
+import io
 import json
 import os
 import tempfile
 import unittest
+import contextlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -854,6 +856,28 @@ class SnapshotContract(unittest.TestCase):
         view = self.view([self.item(1, "waiting")])
         snapshot = attention.payload(view, now=NOW)
         self.assertEqual(snapshot["tiers"][2]["items"][0]["section"], "waiting")
+
+
+class DroppedConnections(unittest.TestCase):
+    """A reader that goes away mid-request (reload during a slow refresh, tab
+    closed) must not print a stack trace; a real bug still must."""
+
+    def handle(self, exc):
+        server = attention.Server.__new__(attention.Server)   # no socket bound
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            try:
+                raise exc
+            except type(exc):
+                server.handle_error(None, None)
+        return err.getvalue()
+
+    def test_disconnects_are_silent(self):
+        self.assertEqual(self.handle(BrokenPipeError(32, "Broken pipe")), "")
+        self.assertEqual(self.handle(ConnectionResetError(54, "Connection reset")), "")
+
+    def test_other_errors_still_report(self):
+        self.assertIn("ValueError: real bug", self.handle(ValueError("real bug")))
 
 
 if __name__ == "__main__":
