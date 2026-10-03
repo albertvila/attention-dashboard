@@ -25,6 +25,7 @@ import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import quote
 
@@ -658,12 +659,12 @@ def _epoch_ms(ms):
         return ""
 
 
-def _mail_groups(errors, run=None):
+def _mail_groups(errors, run):
     """`group/<name>` user labels -> {label id: label name}. gmcli's labels
     list prints a table (no --json), so this is the one parsed source; a failure
-    only costs grouping."""
+    only costs grouping. `run` is the adapter's text call."""
     try:
-        out = (run or run_text)("gmcli", [MAIL_ACCOUNT, "labels", "list"])
+        out = run("gmcli", [MAIL_ACCOUNT, "labels", "list"])
     except Exception as e:
         errors.append(_error("mail groups", e))
         return {}
@@ -859,29 +860,35 @@ class CliError(RuntimeError):
         super().__init__(output)
 
 
-def run_text(command, args):
-    proc = subprocess.run([command] + args, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise CliError(command + " " + " ".join(args), (proc.stderr or proc.stdout).strip())
-    return proc.stdout
+class Cli:
+    """The one seam every CLI call crosses: text, JSON and GraphQL alike.
+    Production uses LIVE; a test injects a recorded adapter, so a whole
+    collection can run without touching the live tools."""
+
+    def text(self, command, args):
+        proc = subprocess.run([command] + args, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise CliError(command + " " + " ".join(args), (proc.stderr or proc.stdout).strip())
+        return proc.stdout
+
+    def json(self, command, args):
+        return json.loads(self.text(command, args))
+
+    def graphql(self, query):
+        return self.json("gh", ["api", "graphql", "-f", "query=" + query])
 
 
-def run_json(command, args):
-    return json.loads(run_text(command, args))
+LIVE = Cli()
 
 
-def run_gh(args):
-    return run_json("gh", args)
-
-
-def run_graphql(query):
-    return run_gh(["api", "graphql", "-f", "query=" + query])
-
-
-def collect_view(me=None, gh=run_gh):
+def collect_view(me=None, cli=None):
     """Run the live queries and build the view model. Read-only."""
+    cli = cli or LIVE
     errors, items, hidden = [], [], 0
     now = datetime.now(timezone.utc)
+    # The per-card helpers take gh JSON in argv shape; bind that call once off
+    # the adapter so they need no second parameter.
+    gh = partial(cli.json, "gh")
     me = me or _whoami(gh)
 
     try:
@@ -914,7 +921,7 @@ def collect_view(me=None, gh=run_gh):
                                  "number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updatedAt,createdAt,"
                                  "headRefName,author,labels,closingIssuesReferences,body"])
                 checks[key] = _pr_checks(gh, repo, num)
-                threads[key] = _review_threads(gh, repo, num)
+                threads[key] = _review_threads(cli, repo, num)
             except Exception as e:
                 errors.append(_error(f"{_ref(repo, num)}", e))
         items += items_from_own_prs(rows, views, checks, threads, me)
@@ -930,7 +937,7 @@ def collect_view(me=None, gh=run_gh):
             try:
                 views[key] = gh(["issue", "view", str(num), "--repo", repo, "--json",
                                  "number,title,url,body,updatedAt,createdAt,comments,labels"])
-                linked[key] = _issue_links(gh, repo, num)
+                linked[key] = _issue_links(cli, repo, num)
             except Exception as e:
                 errors.append(_error(f"{_ref(repo, num)}", e))
         items += items_from_issues(rows, views, linked, me)
@@ -938,7 +945,7 @@ def collect_view(me=None, gh=run_gh):
         errors.append(_error("assigned issues", e))
 
     try:
-        data = run_json("twg", ["jira", "workitem", "query", "--jql", JIRA_JQL, "--limit", "100",
+        data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_JQL, "--limit", "100",
                                 "--fields", JIRA_FIELDS,
                                 "--output", "json", "--output-summary", "none"])["data"]
         items += items_from_jira(data["issues"] if isinstance(data, dict) else data)
@@ -946,17 +953,17 @@ def collect_view(me=None, gh=run_gh):
         errors.append(_error("jira tasks", e))
 
     try:
-        threads = run_json("gmcli", [MAIL_ACCOUNT, "search", MAIL_QUERY,
+        threads = cli.json("gmcli", [MAIL_ACCOUNT, "search", MAIL_QUERY,
                                       "--max", str(MAIL_MAX), "--json"]).get("threads") or []
-        items += items_from_mail(threads, _mail_groups(errors))
+        items += items_from_mail(threads, _mail_groups(errors, cli.text))
     except Exception as e:
         errors.append(_error("mail", e))
 
-    closed = _collect_closed(gh, me, now, errors)
+    closed = _collect_closed(cli, me, now, errors)
 
     # closed items too: a merged PR can become the header of its card, and the
     # ticket it names is shown inline there rather than as a child.
-    _with_jira(items + closed, errors)
+    _with_jira(items + closed, errors, fetch=partial(_jira_issue, cli))
     return build_view(items, hidden_bots=hidden, errors=errors, now=now, closed=closed)
 
 
@@ -1061,7 +1068,7 @@ def collect_payload(previous=None):
     return payload(collect_view(), previous)
 
 
-def _collect_closed(gh, me, now, errors):
+def _collect_closed(cli, me, now, errors):
     """Items closed/merged in the last CLOSED_WINDOW_HOURS, across all sources.
     GraphQL search: one call per source, and it carries the issue/PR links."""
     since = (now - timedelta(hours=CLOSED_WINDOW_HOURS)).strftime("%Y-%m-%d")
@@ -1074,7 +1081,7 @@ def _collect_closed(gh, me, now, errors):
                  'closingIssuesReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
                  ) % (qualifier, who, since)
         try:
-            nodes = run_graphql(query)["data"]["search"]["nodes"]
+            nodes = cli.graphql(query)["data"]["search"]["nodes"]
         except Exception as e:
             errors.append(_error(f"closed PRs ({chip})", e))
             continue
@@ -1092,12 +1099,12 @@ def _collect_closed(gh, me, now, errors):
              'closedByPullRequestsReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
              ) % (who, since)
     try:
-        nodes = run_graphql(query)["data"]["search"]["nodes"]
+        nodes = cli.graphql(query)["data"]["search"]["nodes"]
         closed += [_closed_issue_item(n) for n in nodes if _within_window(n.get("closedAt"), now)]
     except Exception as e:
         errors.append(_error("closed issues", e))
     try:
-        data = run_json("twg", ["jira", "workitem", "query", "--jql", JIRA_CLOSED_JQL, "--limit", "100",
+        data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_CLOSED_JQL, "--limit", "100",
                                 "--fields", JIRA_CLOSED_FIELDS,
                                 "--output", "json", "--output-summary", "none"])["data"]
         closed += items_from_jira_closed(data["issues"] if isinstance(data, dict) else data)
@@ -1106,11 +1113,10 @@ def _collect_closed(gh, me, now, errors):
     return closed
 
 
-def _with_jira(items, errors, fetch=None):
+def _with_jira(items, errors, fetch):
     """Attach the Jira ticket behind each item's link; one twg call per key.
     A key that does not resolve is not a link: mail subjects and snippets carry
     bare KEY-123 tokens, and UTF-8 / SHA-256 match that shape."""
-    fetch = fetch or _jira_issue
     cache, failures, reported = {}, {}, set()
     for item in items:
         url = item.get("jira")
@@ -1133,9 +1139,9 @@ def _with_jira(items, errors, fetch=None):
     return items
 
 
-def _jira_issue(key):
+def _jira_issue(cli, key):
     """twg jira workitem get -> the few fields the dashboard shows."""
-    item = run_json("twg", ["jira", "workitem", "get", key, "--output", "json",
+    item = cli.json("twg", ["jira", "workitem", "get", key, "--output", "json",
                             "--output-summary", "none"])["data"][0]
     status = item.get("status") or {}
     return {
@@ -1163,22 +1169,22 @@ def _pr_checks(gh, repo, num):
         raise
 
 
-def _review_threads(gh, repo, num):
+def _review_threads(cli, repo, num):
     owner, name = repo.split("/")
     query = (f'query {{ repository(owner:"{owner}", name:"{name}") {{ pullRequest(number:{num}) {{ '
              'reviewThreads(first:50) { nodes { isResolved comments(last:1) { nodes { author { login } body } } } }'
              ' } } }')
-    return run_graphql(query)["data"]["repository"]["pullRequest"]
+    return cli.graphql(query)["data"]["repository"]["pullRequest"]
 
 
-def _issue_links(gh, repo, num):
+def _issue_links(cli, repo, num):
     owner, name = repo.split("/")
     query = (f'query {{ repository(owner:"{owner}", name:"{name}") {{ issue(number:{num}) {{ '
              'closedByPullRequestsReferences(first:10) { nodes { number state title url } } '
              'parent { number state title url } '
              'subIssues(first:50) { nodes { number state title url } }'
              ' } } }')
-    return run_graphql(query)["data"]["repository"]["issue"]
+    return cli.graphql(query)["data"]["repository"]["issue"]
 
 
 def _error(where, exc):
