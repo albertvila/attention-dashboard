@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-/* The shared consumer rules are the one piece of JS the three surfaces all run,
-   so they get a runnable check of their own:  node test_attention_view.mjs
+/* The shared consumer rules are the one piece of JS every surface runs, so they
+   get a runnable check of their own:  node test_attention_view.mjs
 
-   Covers what used to be copied three times: change flags, the closed/new rule,
+   Covers what used to be copied per surface: change flags, the closed/new rule,
    ghosts (hidden in Needs, never for mail), the Mail fold, snooze parking, and
    an ack that only holds while the card has not moved. */
 
