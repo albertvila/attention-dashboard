@@ -7,8 +7,7 @@
   ghosts, folds, parking) comes from attention-view.js, so no attention rule
   lives in this file.
 
-  Served by the producer (http://127.0.0.1:8765/). `?data=<url>` renders a
-  static snapshot instead: no refresh, no parking.
+  Served by the producer (http://127.0.0.1:8765/).
 -->
 <html lang="en"><head><meta charset="utf-8"><title>Attention dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -108,9 +107,6 @@ const app = document.getElementById('app');
 const stamp = document.getElementById('stamp');
 /* The rules live in attention-view.js, shared with the dsh panel: this page
    only renders what the overlay hands it. */
-const params = new URLSearchParams(location.search);
-const DATA_URL = params.get('data');     // static mode: ?data=./attention.json
-const noBackend = !!DATA_URL;            // nothing to refresh or park against
 const SEEN_KEY = 'gha.seenAt';
 let seenAt = null;
 try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
@@ -119,24 +115,20 @@ let snoozes = {}, acks = {}, status = null, view = null;
 async function load(isRefresh){
   stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
   try{
-    const src = isRefresh ? '/refresh' : (DATA_URL || '/api/queue');
-    const res = await fetch(src, {cache:'no-store'});
+    const res = await fetch(isRefresh ? '/refresh' : '/api/queue', {cache:'no-store'});
     const data = await res.json();
-    if(!noBackend){
-      const [snaps, acksRes, statusRes] = await Promise.all([
-        fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'})]);
-      snoozes = await snaps.json().catch(() => ({}));
-      acks = await acksRes.json().catch(() => ({}));
-      status = await statusRes.json().catch(() => null);
-    }
+    const [snaps, acksRes, statusRes] = await Promise.all([
+      fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'})]);
+    snoozes = await snaps.json().catch(() => ({}));
+    acks = await acksRes.json().catch(() => ({}));
+    status = await statusRes.json().catch(() => null);
     view = AttentionView.overlay(data, {seenAt, snoozes, acks});
     render(data);
     stamp.textContent = 'snapshot ' + ageOf(data.generatedAt) + ' · ' + view.summaryText();
     try { localStorage.setItem(SEEN_KEY, data.generatedAt); } catch(e) {}
   }catch(e){
     app.innerHTML = '';
-    app.appendChild(errBox({where:'page', command:'GET ' + (DATA_URL || '/api/queue'), output:String(e)}));
-    if(noBackend) app.appendChild(el('div','empty','Static mode renders a snapshot file: write one with  python3 attention.py --json attention.json'));
+    app.appendChild(errBox({where:'page', command:'GET /api/queue', output:String(e)}));
     stamp.textContent = 'error';
   }
 }
@@ -189,7 +181,6 @@ async function park(key, value){
   load();
 }
 function parkControl(r){
-  if(noBackend) return el('span','snooze');   // nothing to post parking to
   const wrap = el('span','snooze');
   const snoozeUntil = view.snoozeOf(r), ackedAt = view.ackOf(r);
   if(snoozeUntil || ackedAt){
@@ -337,7 +328,6 @@ function errBox(e){
   return d;
 }
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n;}
-document.getElementById('refresh').hidden = noBackend;
 document.getElementById('refresh').onclick = () => load(true);
 load();
 </script></body></html>
