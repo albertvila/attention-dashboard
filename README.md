@@ -1,12 +1,12 @@
-# GitHub attention POC
+# Attention dashboard
 
-One attention queue for GitHub + Jira signals, and one JSON snapshot that every
-surface renders. The Python producer owns the rules; the HTML prototype and the
-POC page are consumers, not copies.
+One attention queue for GitHub, Jira and starred mail, and one JSON snapshot
+that every surface renders. `attention.py` owns the rules; `dashboard.html` is a
+consumer, not a copy.
 
 The snapshot file lives next to this script (`attention.json`) unless a path is
-given: the server reads it, `/refresh` rewrites it, and pages fetch it. Plain
-`gh_attention_poc.py` is enough — the CLI write form is for scripts and crons.
+given: the server reads it, `/refresh` rewrites it, and the page fetches it.
+Plain `attention.py` is enough — the CLI write form is for scripts and crons.
 It is generated state, not source, so it is not committed.
 
 Every snapshot also carries a `producer` stamp — `{code, version}`, where `code`
@@ -20,21 +20,21 @@ instead of being served over.
 ## The snapshot contract
 
 ```bash
-python3 gh_attention_poc.py --json attention.json   # write + print the delta
-python3 gh_attention_poc.py --json -                # stdout (no previous to diff)
-python3 gh_attention_poc.py                         # server on :8765
-python3 gh_attention_poc.py 9000                    # server on :9000
+python3 attention.py --json attention.json   # write + print the delta
+python3 attention.py --json -                # stdout (no previous to diff)
+python3 attention.py                         # server on :8765
+python3 attention.py 9000                    # server on :9000
 ```
 
 The server adds:
 
-- `/`, `/prototype` — pages; every read is instant and file-backed
+- `/` — the dashboard page; every read is instant and file-backed
 - `/attention.json`, `/api/queue` — the cached snapshot (no collection)
 - `/refresh` (GET or POST) — runs the producer, rewrites the shared file,
   returns the new snapshot; one run at a time
 - `/snoozes`, `/acks` — the parking files (GET, and POST to change them)
 - `/status` — this process's producer stamp versus the snapshot's
-- `/attention-view.js` — the shared consumer rules the pages load
+- `/attention-view.js` — the shared consumer rules the page loads
 
 Reads never collect. That is the whole point: the file is the artifact every
 surface consumes, and a refresh is one explicit producer run. If no file exists
@@ -123,11 +123,11 @@ still counts them, so a parked card never disappears silently.
 Both are user intent, not data, so they live beside the snapshot in
 `snoozes.json` (`{key: wake-up ISO}`) and `acks.json` (`{key: acked-at ISO}`) and
 **the snapshot is never touched** — the producer does not know about them. Every
-surface applies the same rule at read time, so parking in the prototype parks it
+surface applies the same rule at read time, so parking in the dashboard parks it
 in the panel too. Expired snoozes fall out on the next write.
 
 The backend writing those same files: `GET/POST /snoozes` and `GET/POST /acks`
-on the POC server (POST `{key, hours}` or `{key, until}`; `hours: 0` wakes;
+on the server (POST `{key, hours}` or `{key, until}`; `hours: 0` wakes;
 `{key, clear: true}` unacks).
 
 ## How linking works
@@ -155,15 +155,15 @@ one of the references above.
 
 `attention-view.js` is the only place the *reader-side* rules live — change
 flags, ghosts (hidden in Needs, never for mail), the Mail/Snoozed/Acknowledged
-folds, and where a card renders. The POC page and the prototype both load it
-(the server serves it at `/attention-view.js`), so the surfaces cannot drift
-apart. `node test_attention_view.mjs` checks it.
+folds, and where a card renders. The dashboard loads it (the server serves it at
+`/attention-view.js`), so the surfaces cannot drift apart.
+`node test_attention_view.mjs` checks it.
 
 The producer owns what is true; this owns what you see on top of it.
 
 ## Change tracking: two layers, on purpose
 
-`with_changes()` in `gh_attention_poc.py` diffs the current snapshot against the
+`with_changes()` in `attention.py` diffs the current snapshot against the
 previous one by `key`:
 
 - `new` — key absent before
@@ -177,7 +177,7 @@ up with looks: the server collects per request, a cron collects per tick, and
 anything else that collects in between eats the delta.
 
 So rows also carry durable stamps, and each surface remembers its own last-look
-timestamp (`gha.seenAt` in localStorage for the prototype and the plugin):
+timestamp (`gha.seenAt` in localStorage for the dashboard and the plugin):
 
 ```
 new       section != closed and firstSeenAt > myLastLook
@@ -200,24 +200,21 @@ First look flags nothing and just records the timestamp. Nothing needs to run on
 a schedule for this to work: whenever the next snapshot arrives, it already
 contains enough history for the reader to see what it missed.
 
-## Surfaces
+## Surface
 
-**POC page** (`/`, served by `gh_attention_poc.py`) — the original single-column
-list, now with the same `new` / `changed` / `dropped` chips and the same
-last-look timestamp (`gha.seenAt`).
-
-**Prototype** (`prototype-attention-dashboard.html`) — three layouts (stacked,
-queue, container rail) over the snapshot. Loads `./attention.json` next to
-itself, or `?data=<url>`; open it via the POC server (`/prototype`) so it always
-has fresh data.
+**Dashboard** (`dashboard.html`, served at `/` by `attention.py`) — the tiers,
+collapsed Mail/Snoozed/Acknowledged/Drafts/Recently closed folds, the
+`new` / `changed` / `dropped` marks, and the last-look timestamp
+(`gha.seenAt`). Loads `./attention.json` next to itself, or `?data=<url>` to
+render a static copy — `data=` mode also hides refresh and parking.
 
 The harness (dsh) plugin that renders the same snapshot in a sidebar panel lives
 outside this repo and is not published here; it reads `attention.json` per
 request and runs the same producer on demand.
 
 ```bash
-# write the snapshot yourself instead of pressing refresh elsewhere
-python3 gh_attention_poc.py --json attention.json
+# write the snapshot yourself instead of pressing refresh
+python3 attention.py --json attention.json
 ```
 
 No cron needed: the flags describe the stretch since your last look whenever you
