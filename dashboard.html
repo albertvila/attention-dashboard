@@ -108,11 +108,29 @@ const stamp = document.getElementById('stamp');
 /* The rules live in attention-view.js, shared with the dsh panel: this page
    only renders what the overlay hands it. */
 const SEEN_KEY = 'gha.seenAt';
+const STALE_MS = 15 * 60 * 1000;
 let seenAt = null;
 try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
 let snoozes = {}, acks = {}, status = null, view = null;
+let snap = null, refreshing = false, looking = false;
+
+/* The last look belongs to a reader who is actually looking: a hidden or
+   restored tab records nothing, and coming back to a snapshot older than 15
+   minutes refreshes it instead. No timer — focus is the only trigger. */
+function stampSeen(){
+  if(document.visibilityState !== 'visible' || !snap) return;
+  try { localStorage.setItem(SEEN_KEY, snap.generatedAt); } catch(e) {}
+}
+function look(){
+  if(document.visibilityState !== 'visible') return;
+  if(!snap){ looking = true; return; }
+  if(Date.now() - Date.parse(snap.generatedAt) > STALE_MS){ load(true); return; }
+  stampSeen();
+}
 
 async function load(isRefresh){
+  if(isRefresh && refreshing) return;
+  if(isRefresh) refreshing = true;
   stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
   try{
     const res = await fetch(isRefresh ? '/refresh' : '/api/queue', {cache:'no-store'});
@@ -122,41 +140,47 @@ async function load(isRefresh){
     snoozes = await snaps.json().catch(() => ({}));
     acks = await acksRes.json().catch(() => ({}));
     status = await statusRes.json().catch(() => null);
+    snap = data;
     view = AttentionView.overlay(data, {seenAt, snoozes, acks});
     render(data);
     stamp.textContent = 'snapshot ' + ageOf(data.generatedAt) + ' · ' + view.summaryText();
-    try { localStorage.setItem(SEEN_KEY, data.generatedAt); } catch(e) {}
+    if(looking){ looking = false; look(); } else stampSeen();
   }catch(e){
     app.innerHTML = '';
     app.appendChild(errBox({where:'page', command:'GET /api/queue', output:String(e)}));
     stamp.textContent = 'error';
+  }finally{
+    if(isRefresh) refreshing = false;
   }
 }
 function render(data){
   app.innerHTML = '';
   const staleText = AttentionView.staleText(data, status);
   if(staleText) app.appendChild(el('div','err', staleText));
-  for(const fold of [['Snoozed', view.folds.snoozed, 'wake one to bring it back'],
-                     ['Acknowledged', view.folds.acked, 'hidden until the card changes'],
-                     ['Drafts', view.folds.drafts, 'tests / POCs — collapsed by default'],
-                     ['Recently closed', view.folds.closed, 'last 24h']]){
-    if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
-  }
   for(const tier of view.tiers){
     const s = document.createElement('section');
     const h = document.createElement('h2');
     h.textContent = tier.title + ' · ' + tier.count;
     s.appendChild(h);
-    if(!tier.rows.length){ s.appendChild(el('div','empty','Nothing here.')); }
+    if(!tier.rows.length){ s.appendChild(el('div','empty', tier.key === 'needs' ? view.nextCard() : 'Nothing here.')); }
     for(const it of tier.rows) s.appendChild(row(it));
     app.appendChild(s);
   }
-  if(view.folds.mail.length) app.appendChild(foldBox('Mail', view.folds.mail, 'starred threads — collapsed by default'));
+  for(const fold of [['With support', view.folds.support, view.notes.support()],
+                     ['Mail', view.folds.mail, view.notes.mail()],
+                     ['Snoozed', view.folds.snoozed, 'wake one to bring it back'],
+                     ['Acknowledged', view.folds.acked, 'hidden until the card changes'],
+                     ['Drafts', view.folds.drafts, view.notes.drafts()],
+                     ['Recently closed', view.folds.closed, 'last 24h']]){
+    if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
+  }
   for(const e of data.errors) app.appendChild(errBox(e));
   if(data.hidden_bots) app.appendChild(el('div','hidden','+'+data.hidden_bots+' hidden (bot-authored review requests)'));
   app.appendChild(helpBox([
-    'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Mail fold instead of the tiers. Un-star one to clear it; nothing here changes your mail.',
-    'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, merged work whose ticket may still need closing). Waiting on others: you handed off (PRs awaiting review, tickets in progress or with support, mail you answered).',
+    'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Mail fold instead of the tiers. The star is membership and nothing else; the badge follows who sent the last message: waiting reply when that was you, needs reply when it was someone else. Un-star one to clear it; nothing here changes your mail.',
+    'Support — a Jira ticket in Support Investigating is waiting on others, and renders in the collapsed With support fold rather than the Waiting queue. Expand the fold to read it.',
+    'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, merged work whose ticket may still need closing). Waiting on others: you handed off (PRs awaiting review, tickets in progress). When Needs is empty, its line names the first Ready card.',
+    'Folds — a card in a fold is not in a tier count. The summary says what is inside: the oldest age, unread mail, conflicted drafts.',
     'Grouping — two ways: a Jira key or GitHub ref links items into one card automatically (a merged PR stays with its ticket and lifts the card to Ready), and a group/<name> label merges threads that share nothing but the topic. The top line of a card is its most urgent member; the rest are children.',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped (struck through, and hidden in Needs you now).',
     'Parking — the picker on each card snoozes it (4 hours / 1 day / 3 days / 1 week) or acknowledges it (until it changes). Shared with the other dashboards; the snapshot itself is untouched.'
@@ -329,6 +353,8 @@ function errBox(e){
 }
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n;}
 document.getElementById('refresh').onclick = () => load(true);
+document.addEventListener('visibilitychange', look);
+window.addEventListener('focus', look);
 load();
 </script></body></html>
 "

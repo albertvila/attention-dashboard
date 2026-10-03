@@ -53,6 +53,7 @@ STATES = {
     "done": (READY, "done", "good"),
     "waiting": (WAITING, "waiting", "quiet"),
     "waiting-reply": (WAITING, "waiting reply", "quiet"),
+    "with-support": (WAITING, "with support", "quiet"),
     "in-progress": (WAITING, "in progress", "info"),
     "closed": (WAITING, "closed", "quiet"),
 }
@@ -68,7 +69,7 @@ def _state(key):
 SCHEMA_VERSION = 1
 # Bumped by hand for human-meaningful changes; the code hash below is the
 # automatic "which build wrote this file" witness a stale process is caught by.
-PRODUCER_VERSION = 2
+PRODUCER_VERSION = 3
 _PRODUCER_CODE = None
 
 
@@ -103,6 +104,9 @@ JIRA_BASE = "https://launchmetrics.atlassian.net/browse/"
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+")
 # Done-category statuses that still need you (deploy work that isn't finished).
 DEPLOY_STATUSES = ("TO_DEPLOY",)
+# Waiting on a support engineer: still waiting on others, but folded out of the
+# rendered tier at read time so it does not swell the queue.
+SUPPORT_STATUS = "Support Investigating"
 JIRA_JQL = ("assignee = currentUser() AND (statusCategory != Done OR "
             + " OR ".join(f'status = "{s}"' for s in DEPLOY_STATUSES)
             + ") ORDER BY updated DESC")
@@ -332,16 +336,18 @@ def _move_label(was_row, row):
 
 
 def _iter_rows(view):
-    """(section, row) for every card a surface renders, children included."""
-    for tier in view.get("tiers") or []:
-        for row in tier["items"]:
-            yield tier["key"], row
+    """(section, row) for every card a surface renders, children included.
+    Every section, drafts and closed too: a child that rode into the closed log
+    with its parent is still a row a surface draws, so the diff must see it —
+    otherwise it is reported gone and surfaces ghost it back into the tier it
+    left, as work that is still owed."""
+    sections = [(t["key"], t["items"]) for t in view.get("tiers") or []]
+    sections += [("drafts", view.get("drafts") or []), ("closed", view.get("closed") or [])]
+    for section, rows in sections:
+        for row in rows:
+            yield section, row
             for child in row.get("children") or []:
-                yield tier["key"], child
-    for row in view.get("drafts") or []:
-        yield "drafts", row
-    for row in view.get("closed") or []:
-        yield "closed", row
+                yield section, child
 
 
 # Gone rows stay in the snapshot long enough for a surface that was not open
@@ -630,6 +636,8 @@ def items_from_jira(rows):
         key = row["key"]
         if status_name in DEPLOY_STATUSES:
             state = "to-deploy"
+        elif status_name == SUPPORT_STATUS:
+            state = "with-support"
         elif category == "In Progress":
             state = "in-progress"
         else:
@@ -701,13 +709,17 @@ def items_from_mail(threads, groups=None):
             facts.append({"label": "attachment", "tone": "quiet"})
         if group:
             facts.append({"label": group, "tone": "info"})
+        sender_name, sender_address = parseaddr(last.get("from", ""))
         items.append(_item(
             "MAIL", source="mail", key=f"mail/{thread_id}", title=last.get("subject", ""),
             url=mail_url(MAIL_ACCOUNT, thread_id),
-            author=parseaddr(last.get("from", ""))[0] or last.get("from", ""),
+            author=sender_name or last.get("from", ""),
             jira=jira_url(keys[-1]) if keys else "",
             links=([group] if group else []) + _github_links_in(text),
-            states=["needs-reply"], detail=html.unescape(last.get("snippet", ""))[:140],
+            # the badge follows who sent last: the mailbox account means the ball
+            # is with them, anyone else (or no sender at all) means it is yours.
+            states=["waiting-reply" if sender_address == MAIL_ACCOUNT else "needs-reply"],
+            detail=html.unescape(last.get("snippet", ""))[:140],
             facts=facts,
             times={"updated": _epoch_ms(last.get("internalDate")),
                    "created": _epoch_ms(first.get("internalDate"))}))

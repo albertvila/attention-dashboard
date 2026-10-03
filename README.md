@@ -83,9 +83,12 @@ Every starred thread is in the queue, archived ones included:
 `MAIL_ACCOUNT`). Un-star a thread and it drops out on the next refresh —
 archiving does not, and the dashboard never writes to Gmail.
 
-A thread becomes one card (`mail/<threadId>`, state `needs-reply`). Cards render in a
-**collapsed Mail fold** rather than the tiers — like drafts — so starred mail never
-inflates the Needs count; expand the fold to read them. Otherwise:
+A thread becomes one card (`mail/<threadId>`). The **star is membership and
+nothing else**; the state follows who sent the last message — `waiting-reply`
+when the From address is the mailbox account, `needs-reply` when it is anyone
+else (or missing). Cards render in a **collapsed Mail fold** rather than the
+tiers — like drafts — so starred mail never inflates the Needs count; expand the
+fold to read them, and its summary says `oldest <age> · <n> unread`. Otherwise:
 with `unread` / `N messages` / `attachment` as facts, the snippet as detail, and
 a Gmail deep link. A Jira key or GitHub ref in the subject/snippet merges the
 email into that ticket's card; a key that does not resolve is ignored (free text
@@ -105,6 +108,15 @@ cluster together**, so a merged PR stays with its ticket instead of splitting in
 the closed log — and because the merged state ranks above waiting, that card moves
 to **Ready when you are** with the ticket shown inline. Only groups whose members
 are all closed go to the closed log.
+
+## With support (Jira)
+
+A Jira ticket in `Support Investigating` has state `with-support`: it stays in the
+snapshot's **waiting** tier and renders in a collapsed **With support fold**
+rather than the Waiting queue, so a ticket parked with support does not inflate
+the rendered Waiting count. The fold summary names the oldest age. A ticket that
+has not started stays in Needs, and `Waiting for Customer` stays `in-progress` —
+the support status is the only one that folds.
 
 ## Parking a card
 
@@ -154,9 +166,13 @@ one of the references above.
 ## Consumer rules: one implementation
 
 `attention-view.js` is the only place the *reader-side* rules live — change
-flags, ghosts (hidden in Needs, never for mail), the Mail/Snoozed/Acknowledged
-folds, and where a card renders. The dashboard loads it (the server serves it at
-`/attention-view.js`), so the surfaces cannot drift apart.
+flags, ghosts (hidden in Needs, never for mail or support), the With
+support/Mail/Snoozed/Acknowledged folds, the fold summaries (oldest age, unread
+mail, conflicted drafts — built from the ages already on the rows, never a
+second calculation), the next-card line an empty Needs tier shows (the first
+Ready card, or nothing when Ready is empty too), and where a card renders. The
+dashboard loads it (the server serves it at `/attention-view.js`), so the
+surfaces cannot drift apart.
 `node test_attention_view.mjs` checks it.
 
 The producer owns what is true; this owns what you see on top of it.
@@ -203,8 +219,8 @@ contains enough history for the reader to see what it missed.
 ## Surface
 
 **Dashboard** (`dashboard.html`, served at `/` by `attention.py`) — the tiers,
-collapsed Mail/Snoozed/Acknowledged/Drafts/Recently closed folds, the
-`new` / `changed` / `dropped` marks, and the last-look timestamp
+collapsed With support/Mail/Snoozed/Acknowledged/Drafts/Recently closed folds,
+the `new` / `changed` / `dropped` marks, and the last-look timestamp
 (`gha.seenAt`). Every read comes from the producer at `/api/queue`.
 
 The harness (dsh) plugin that renders the same snapshot in a sidebar panel lives
