@@ -260,6 +260,45 @@ class JiraSource(unittest.TestCase):
         self.assertIn("RBT-2", [r["ref"] for r in view["tiers"][0]["items"]])
         self.assertIn("RBT-4", [r["ref"] for r in view["tiers"][1]["items"]])
 
+    def test_support_investigating_is_waiting_with_the_status_as_fact(self):
+        rows = [
+            {"key": "FIRE-1", "summary": "with support",
+             "status": {"name": "Support Investigating", "statusCategory": {"name": "In Progress"}},
+             "issueType": {"name": "Task"}},
+        ]
+        item = attention.items_from_jira(rows)[0]
+        self.assertEqual(item["states"], ["with-support"])
+        self.assertEqual(item["facts"], [{"label": "Support Investigating", "tone": "warn"}])
+        view = attention.build_view([item], now=NOW)
+        row = find(view, "FIRE-1")
+        self.assertEqual(row["states"][0]["tier"], "waiting")
+        self.assertEqual(row["states"][0]["label"], "with support")
+        # no new section: the snapshot keeps it in waiting, the reader folds it out
+        snapshot = attention.payload(view, now=NOW)
+        self.assertEqual(snapshot["tiers"][2]["items"][0]["section"], "waiting")
+
+    def test_only_the_support_status_maps_to_with_support(self):
+        """Waiting for Customer keeps the category mapping, a ticket that has not
+        started stays in Needs, and to-deploy stays in Ready."""
+        rows = [
+            {"key": "FIRE-1", "summary": "a",
+             "status": {"name": "Waiting for Customer", "statusCategory": {"name": "In Progress"}},
+             "issueType": {}},
+            {"key": "FIRE-2", "summary": "b",
+             "status": {"name": "To Do", "statusCategory": {"name": "To Do"}}, "issueType": {}},
+            {"key": "FIRE-3", "summary": "c",
+             "status": {"name": "TO_DEPLOY", "statusCategory": {"name": "Done"}}, "issueType": {}},
+            {"key": "FIRE-4", "summary": "d",
+             "status": {"name": "Support Investigating", "statusCategory": {"name": "In Progress"}},
+             "issueType": {}},
+        ]
+        items = attention.items_from_jira(rows)
+        self.assertEqual([i["states"] for i in items],
+                         [["in-progress"], ["not-started"], ["to-deploy"], ["with-support"]])
+        view = attention.build_view(items, now=NOW)
+        self.assertEqual({r["ref"]: i for i, t in enumerate(view["tiers"]) for r in t["items"]},
+                         {"FIRE-1": 2, "FIRE-2": 0, "FIRE-3": 1, "FIRE-4": 2})
+
 
 class Clustering(unittest.TestCase):
     def test_linked_pr_issue_spec_become_one_card(self):
@@ -681,6 +720,28 @@ class MailSource(unittest.TestCase):
     def test_no_group_label_means_no_link(self):
         self.assertEqual(attention.items_from_mail(self.THREADS)[0]["links"], [])
 
+    def test_the_badge_follows_who_sent_the_last_message(self):
+        """The star is membership and nothing else; the state is the last From
+        compared with the mailbox account."""
+
+        def card(sender):
+            return attention.items_from_mail([{"id": "t1", "messages": [
+                {"id": "m1", "threadId": "t1", "labelIds": ["INBOX", "STARRED"],
+                 "snippet": "first", "internalDate": "1790764004000",
+                 "from": '"Antoni" <antoni@example.com>', "subject": "s"},
+                {"id": "m2", "threadId": "t1", "labelIds": ["INBOX", "STARRED"],
+                 "snippet": "last", "internalDate": "1790775262000",
+                 "from": sender, "subject": "Re: s"},
+            ]}])[0]
+
+        mine = card(f'"You" <{attention.MAIL_ACCOUNT}>')
+        self.assertEqual(mine["states"], ["waiting-reply"])
+        self.assertEqual(mine["chip"], "MAIL")          # still the star's card, still mail
+        self.assertEqual(mine["key"], "mail/t1")
+        self.assertEqual(mine["author"], "You")
+        self.assertEqual(card('"Antoni" <antoni@example.com>')["states"], ["needs-reply"])
+        self.assertEqual(card("")["states"], ["needs-reply"])   # no From at all
+
     def test_group_labels_are_read_from_the_table(self):
         table = ("ID\tNAME\tTYPE\n"
                  "Label_g1\tgroup/summit\tuser\n"
@@ -828,6 +889,23 @@ class SnapshotContract(unittest.TestCase):
         after = attention.payload(attention.build_view([], now=NOW, closed=[merged]), previous=before, now=NOW)
         self.assertEqual(after["changes"]["items"]["o/r#1"]["to_state"], "merged")
         self.assertEqual(after["changes"]["summary"], {"new": 0, "moved": 1, "gone": 0})
+
+    def test_a_card_moving_into_the_closed_log_moves_its_children_too(self):
+        """The closed log holds a merged PR with the issue it closes as a child.
+        That child rode out of the tiers with its parent, so the diff moves it —
+        reporting it gone is what a surface then draws as a ghost in the tier it
+        left, which reads as work that is still owed."""
+        before = attention.payload(self.view([
+            dict(self.item(1, "waiting-reply"), links=["o/r#2"]),
+            dict(self.item(2, "reviewed"), links=["o/r#1"])]), now=NOW)
+        after = attention.payload(attention.build_view([], now=NOW, closed=[
+            dict(self.item(2, "merged"), links=["o/r#1"]),
+            dict(self.item(1, "closed"), links=["o/r#2"])]), previous=before, now=NOW)
+        children = after["closed"][0]["children"]
+        self.assertEqual(len(children), 1)                          # it rode along
+        self.assertEqual(children[0]["section"], "closed")
+        self.assertEqual(after["changes"]["summary"]["gone"], 0)   # not dropped
+        self.assertEqual(after["changes"]["items"][children[0]["key"]]["kind"], "moved")
 
     def test_closed_cards_are_never_new(self):
         """A PR that closes while you are away enters Recently closed for the

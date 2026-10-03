@@ -3,8 +3,9 @@
    get a runnable check of their own:  node test_attention_view.mjs
 
    Covers what used to be copied per surface: change flags, the closed/new rule,
-   ghosts (hidden in Needs, never for mail), the Mail fold, snooze parking, and
-   an ack that only holds while the card has not moved. */
+   ghosts (hidden in Needs, never for mail or support), the With support and Mail
+   folds, snooze parking, an ack that only holds while the card has not moved,
+   the fold summaries, and the next-card line. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -105,6 +106,104 @@ view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'r
 assert.deepEqual(view.folds.acked, []);                            // it moved: back on the board
 assert.equal(view.tiers[2].count, 1);
 assert.equal(view.flag(view.tiers[2].rows[0]).kind, 'moved');
+
+// --- With support: a Jira card in Support Investigating ---------------------
+const SUPPORT = { key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' };
+const sup = (over = {}) => row({ key: 'SUP-1', ref: 'SUP-1', age: '1d', states: [SUPPORT],
+  times: { updated: '2026-10-01T12:00:00.000Z' }, ...over });
+const supData = (items) => data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                           { key: 'ready', title: 'r', items: [] },
+                                           { key: 'waiting', title: 'w', items }] });
+
+view = overlay(supData([sup(), row()]), { now: NOW });
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1']);    // out of the queue
+assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // in its own fold
+assert.equal(view.tiers[2].count, 1);                                // the count is the queue, not the fold
+
+// the header's state decides, children included — membership is by card, not member
+view = overlay(supData([sup({ children: [row({ key: 'C1', states: [{ key: 'needs-reply', label: 'needs reply', tier: 'needs', tone: 'warn' }] })] })]), { now: NOW });
+assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.folds.support[0].children.map(r => r.key), ['C1']);
+assert.deepEqual(view.tiers[2].rows, []);
+// a more urgent header stays in its own tier, its support child along for the ride
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [row({ key: 'N1', children: [sup()] })] },
+                               { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }), { now: NOW });
+assert.deepEqual(view.tiers[0].rows.map(r => r.key), ['N1']);
+assert.deepEqual(view.folds.support, []);
+
+// parking beats the support fold, and coming back lands in the fold, not the queue
+view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-03T12:00:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.snoozed.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.folds.support, []);
+assert.equal(view.tiers[2].count, 0);
+view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-01T00:00:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // expired: back in the fold
+assert.deepEqual(view.tiers[2].rows, []);
+view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-10-02T11:00:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.acked.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.folds.support, []);
+view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-09-30T00:00:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // released: still not the queue
+
+// a vanished one does not ghost back into the queue; the header still counts the drop
+const supGhost = sup({ goneAt: '2026-10-02T11:30:00.000Z', change: { kind: 'gone' } });
+view = overlay({ ...supData([row()]), changes: { previousAt: '2026-10-02T11:00:00.000Z', summary: {}, items: {}, gone: [supGhost] } }, { now: NOW });
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1']);
+assert.equal(view.counts().gone, 1);
+// a new one still counts as new
+assert.equal(overlay(supData([sup({ firstSeenAt: '2026-10-02T11:30:00.000Z' })]), { now: NOW }).counts().new, 1);
+// and a changed one still counts as changed
+view = overlay(supData([sup({ lastChangedAt: '2026-10-02T11:30:00.000Z',
+  lastChange: { kind: 'moved', label: 'waiting → with support' } })]), { now: NOW });
+assert.equal(view.counts().changed, 1);
+// an ordinary in-progress row stays exactly where it was
+assert.deepEqual(overlay(supData([row()]), { now: NOW }).tiers[2].rows.map(r => r.key), ['FIRE-1']);
+
+// --- fold summaries: what a collapsed fold is hiding ------------------------
+const mailRow = (over = {}) => row({ chip: 'MAIL', key: 'mail/' + (over.id || '1'), ref: '',
+  states: [{ key: 'needs-reply', label: 'needs reply', tier: 'needs', tone: 'warn' }], ...over });
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [
+    mailRow({ id: '1', age: '5d', times: { updated: '2026-09-27T12:00:00.000Z' }, facts: [{ label: 'unread', tone: 'warn' }] }),
+    mailRow({ id: '2', age: '2d', times: { updated: '2026-09-30T12:00:00.000Z' } })] },
+  { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }), { now: NOW });
+assert.equal(view.notes.mail(), 'oldest 5d · 1 unread');            // the oldest row's own age
+assert.equal(view.notes.drafts(), '');                             // nothing hidden, nothing to say
+assert.equal(view.notes.support(), '');
+// unread shows even at zero, and no updated time means no oldest clause
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [mailRow({ id: '1' })] },
+                              { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }), { now: NOW });
+assert.equal(view.notes.mail(), '0 unread');
+// a conflicted draft says so; a draft without conflicts is just old
+view = overlay(data({ drafts: [row({ key: 'D1', draft: true, age: '4d',
+  times: { updated: '2026-09-28T12:00:00.000Z' },
+  states: [{ key: 'conflicts', label: 'merge conflicts', tier: 'needs', tone: 'bad' }] })] }), { now: NOW });
+assert.equal(view.notes.drafts(), 'conflicts · oldest 4d');
+assert.deepEqual(view.folds.drafts.map(r => r.key), ['D1']);        // a conflicted draft stays in Drafts
+assert.deepEqual(view.tiers[0].rows, []);
+view = overlay(data({ drafts: [row({ key: 'D1', draft: true, age: '4d',
+  times: { updated: '2026-09-28T12:00:00.000Z' } })] }), { now: NOW });
+assert.equal(view.notes.drafts(), 'oldest 4d');
+assert.equal(overlay(data({ drafts: [row({ key: 'D1', draft: true })] }), { now: NOW }).notes.drafts(), '');
+// support names the oldest age of the rows it is hiding
+view = overlay(supData([sup(), sup({ key: 'SUP-2', age: '1h', times: { updated: '2026-10-02T11:00:00.000Z' } })]), { now: NOW });
+assert.equal(view.notes.support(), 'oldest 1d');
+
+// --- the next-card line -----------------------------------------------------
+const readyRow = (over = {}) => row({ key: 'o/r#7', ref: 'o/r#7', title: 'a ready PR',
+  states: [{ key: 'ready', label: 'ready', tier: 'ready', tone: 'good' }], ...over });
+const lineData = (needs, ready, waiting) => data({ tiers: [
+  { key: 'needs', title: 'n', items: needs }, { key: 'ready', title: 'r', items: ready },
+  { key: 'waiting', title: 'w', items: waiting || [row()] }] });
+assert.equal(overlay(lineData([row()], [readyRow()]), { now: NOW }).nextCard(), null);   // work in Needs: no line
+assert.equal(overlay(lineData([], [readyRow()]), { now: NOW }).nextCard(),
+  'Nothing needs you. Next: o/r#7 · ready');
+assert.equal(overlay(lineData([], [readyRow({ ref: '', title: 'a ready PR' })]), { now: NOW }).nextCard(),
+  'Nothing needs you. Next: a ready PR · ready');                                         // no ref: the title
+assert.equal(overlay(lineData([], []), { now: NOW }).nextCard(), 'Nothing needs you.');
+// never a waiting row, never a fold: only Ready is work you can pick up
+assert.equal(overlay(lineData([], []), { now: NOW }).nextCard().includes('FIRE-1'), false);
+assert.equal(overlay(supData([sup()]), { now: NOW }).nextCard(), 'Nothing needs you.');
+assert.equal(overlay(lineData([mailRow({ id: '1' })], []), { now: NOW }).nextCard(), 'Nothing needs you.');
 
 // --- stale-code witness -----------------------------------------------------
 assert.deepEqual(globalThis.AttentionView.stale({ producer: { code: 'aaa' } }, { producer: { code: 'aaa' } }),
