@@ -119,8 +119,8 @@ between collecting and rendering.
 _Avoid_: presenter, presentation layer
 
 **Surface**:
-Anything that renders a snapshot: the dashboard, the sidebar panel. A surface
-applies reader rules; it decides nothing about what is true.
+Whatever renders a snapshot and applies the reader rules: today the dashboard.
+A surface decides nothing about what is true.
 _Avoid_: client, frontend, UI
 
 **CLI seam**:

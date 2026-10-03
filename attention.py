@@ -1224,7 +1224,7 @@ class Server(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     """Reads are served from the cached snapshot (instant); only /refresh runs
     the producer. Every refresh rewrites the shared file, so file readers (the
-    dsh plugin) and HTTP readers (the page, other tools) see the same chain."""
+    CLI, other tools) and HTTP readers (the page) see the same chain."""
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -1324,8 +1324,8 @@ def status():
 
 def cached_payload():
     """What every read gets: the file, the in-memory copy, or one cold-start
-    collection when neither exists yet. Another writer (the CLI, the panel's
-    refresh) can rewrite the file behind us, so a changed mtime wins over the
+    collection when neither exists yet. Another writer (the CLI, another
+    collector) can rewrite the file behind us, so a changed mtime wins over the
     cached copy — otherwise this server and the file drift apart silently."""
     global LAST_PAYLOAD, LAST_MTIME
     path = default_snapshot_path()
