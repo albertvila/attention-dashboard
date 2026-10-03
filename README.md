@@ -14,7 +14,7 @@ is a hash of the collector that wrote it. `GET /status` reports the running coll
 snapshot's, and every surface shows a warning when they differ: that is the
 witness for a long-lived server rewriting the file with old rules, or a snapshot
 that predates the code. A changed file mtime also makes the server drop its
-in-memory copy, so an external writer (the CLI, the panel's Refresh) is picked up
+in-memory copy, so an external writer (the CLI, another collector) is picked up
 instead of being served over.
 
 ## The snapshot contract
@@ -135,8 +135,8 @@ still counts them, so a parked card never disappears silently.
 Both are user intent, not data, so they live beside the snapshot in
 `snoozes.json` (`{key: wake-up ISO}`) and `acks.json` (`{key: acked-at ISO}`) and
 **the snapshot is never touched** — the producer does not know about them. Every
-surface applies the same rule at read time, so parking in the dashboard parks it
-in the panel too. Expired snoozes fall out on the next write.
+surface applies the same rule at read time. Expired snoozes fall out on the next
+write.
 
 The backend writing those same files: `GET/POST /snoozes` and `GET/POST /acks`
 on the server (POST `{key, hours}` or `{key, until}`; `hours: 0` wakes;
@@ -222,10 +222,6 @@ contains enough history for the reader to see what it missed.
 collapsed With support/Mail/Snoozed/Acknowledged/Drafts/Recently closed folds,
 the `new` / `changed` / `dropped` marks, and the last-look timestamp
 (`gha.seenAt`). Every read comes from the producer at `/api/queue`.
-
-The harness (dsh) plugin that renders the same snapshot in a sidebar panel lives
-outside this repo and is not published here; it reads `attention.json` per
-request and runs the same producer on demand.
 
 ```bash
 # write the snapshot yourself instead of pressing refresh

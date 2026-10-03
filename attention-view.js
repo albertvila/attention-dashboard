@@ -1,5 +1,5 @@
-/* attention-view.js — what a *reader* sees, shared verbatim by the dashboard and
-   the dsh panel.
+/* attention-view.js — what a *reader* sees, shared verbatim by every surface that
+   renders the snapshot.
 
    The producer owns what is true (states, tiers, links, change stamps). This
    owns the layer on top of it: change flags since the reader's last look, ghosts
