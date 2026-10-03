@@ -165,8 +165,7 @@ class OwnPRs(unittest.TestCase):
         threads = {"reviewThreads": {"nodes": [{"isResolved": False,
                                                    "comments": {"nodes": [{"author": {"login": "someone"}}]}}]}}
         self.assertEqual(attention.pr_states(view, [], threads), ["needs-comments", "conflicts"])
-        built = attention.build_view([{"source": "github", "ref": "r#1", "states": ["conflicts"],
-                                 "times": {}}], now=NOW)
+        built = attention.build_view([attention._item("", ref="r#1", states=["conflicts"])], now=NOW)
         self.assertEqual(built["tiers"][0]["items"][0]["ref"], "r#1")
 
     def test_ci_failing(self):
@@ -185,11 +184,9 @@ class OwnPRs(unittest.TestCase):
 
 class JiraEnrichment(unittest.TestCase):
     def test_one_fetch_per_key_and_view_model_passthrough(self):
-        items = [{"source": "github", "ref": "r#1", "states": ["ready"], "times": {},
-                  "jira": "https://x/browse/FIRE-1"},
-                 {"source": "github", "ref": "r#2", "states": ["ready"], "times": {},
-                  "jira": "https://x/browse/FIRE-1"},
-                 {"source": "github", "ref": "r#3", "states": ["ready"], "times": {}, "jira": ""}]
+        items = [attention._item("", ref="r#1", states=["ready"], jira="https://x/browse/FIRE-1"),
+                 attention._item("", ref="r#2", states=["ready"], jira="https://x/browse/FIRE-1"),
+                 attention._item("", ref="r#3", states=["ready"])]
         calls = []
 
         def fetch(key):
@@ -207,7 +204,7 @@ class JiraEnrichment(unittest.TestCase):
         self.assertIsNone(find(view, "r#3")["jira_issue"])
 
     def test_failure_is_reported_not_fatal(self):
-        items = [{"jira": "https://x/browse/FIRE-1"}]
+        items = [attention._item("", jira="https://x/browse/FIRE-1")]
         errors = []
 
         def fetch(key):
@@ -282,20 +279,18 @@ class Clustering(unittest.TestCase):
                "isDraft": False, "createdAt": "2026-09-29T13:30:00Z", "updatedAt": "2026-09-29T14:00:00Z"}
         items, _ = attention.items_from_review_search([row])
         self.assertEqual(items[0]["links"], ["Launchmetrics/PLS-rubin#2330"])
-        issue = {"source": "github", "chip": "ISSUE", "container": "Launchmetrics/PLS-rubin",
-                 "ref": "PLS-rubin#2330", "url": "", "states": ["waiting-reply"], "times": {}}
+        issue = attention._item("ISSUE", container="Launchmetrics/PLS-rubin",
+                                ref="PLS-rubin#2330", states=["waiting-reply"])
         view = attention.build_view(items + [issue], now=NOW)
         header = find(view, "PLS-rubin#2331")
         self.assertEqual([c["ref"] for c in header["children"]], ["PLS-rubin#2330"])
 
     def test_children_keep_facts_detail_and_labels(self):
         items = [
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#1", "url": "",
-             "states": ["waiting"], "times": {}, "detail": "awaiting review",
-             "facts": [{"label": "checks green", "tone": "ok"}],
-             "labels": [{"name": "bug", "color": "d73a4a"}]},
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2", "url": "",
-             "states": ["ready"], "times": {}, "links": ["o/r#1"]},
+            attention._item("MY PR", container="o/r", ref="r#1", states=["waiting"],
+                            detail="awaiting review", facts=[{"label": "checks green", "tone": "ok"}],
+                            labels=[{"name": "bug", "color": "d73a4a"}]),
+            attention._item("ISSUE", container="o/r", ref="r#2", states=["ready"], links=["o/r#1"]),
         ]
         view = attention.build_view(items, now=NOW)
         child = find(view, "r#1")
@@ -305,10 +300,9 @@ class Clustering(unittest.TestCase):
 
     def test_cluster_lands_in_its_most_urgent_tier(self):
         items = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2",
-             "url": "u2", "states": ["waiting"], "times": {}},
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#5",
-             "url": "u5", "states": ["needs-comments"], "times": {}, "links": ["o/r#2"]},
+            attention._item("ISSUE", container="o/r", ref="r#2", url="u2", states=["waiting"]),
+            attention._item("MY PR", container="o/r", ref="r#5", url="u5",
+                            states=["needs-comments"], links=["o/r#2"]),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual(refs(view, "needs"), ["r#5"])
@@ -330,9 +324,9 @@ class Clustering(unittest.TestCase):
                                      {"Launchmetrics/BIT-databricks#2048": empty_rel}, "me")[0]
         self.assertEqual(item["links"], ["Launchmetrics/PLS-databricks#349"])
 
-        pr = {"source": "github", "chip": "MY PR", "container": "Launchmetrics/PLS-databricks",
-              "ref": "PLS-databricks#349", "title": "feat: move data unification", "url": "u",
-              "states": ["waiting"], "times": {"updated": "2026-09-29T11:00:00Z"}}
+        pr = attention._item("MY PR", container="Launchmetrics/PLS-databricks", ref="PLS-databricks#349",
+                             title="feat: move data unification", url="u", states=["waiting"],
+                             times={"updated": "2026-09-29T11:00:00Z"})
         view = attention.build_view([item, pr], now=NOW)
         cards = [i for t in view["tiers"] for i in t["items"]]
         self.assertEqual(len(cards), 1)
@@ -341,10 +335,9 @@ class Clustering(unittest.TestCase):
 
     def test_draft_cluster_goes_to_drafts_with_children(self):
         items = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2",
-             "url": "", "states": ["waiting"], "times": {}},
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#5", "draft": True,
-             "url": "", "states": ["needs-comments"], "times": {}, "links": ["o/r#2"]},
+            attention._item("ISSUE", container="o/r", ref="r#2", states=["waiting"]),
+            attention._item("MY PR", container="o/r", ref="r#5", draft=True,
+                            states=["needs-comments"], links=["o/r#2"]),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual([r["ref"] for r in view["drafts"]], ["r#5"])
@@ -353,12 +346,10 @@ class Clustering(unittest.TestCase):
 
     def test_jira_key_and_description_join_the_cluster(self):
         items = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#1",
-             "url": "", "states": ["waiting"], "times": {}, "links": ["o/r#2"]},
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#2",
-             "url": "", "states": ["waiting"], "times": {}, "jira": "https://x/browse/RBT-1"},
-            {"source": "jira", "chip": "JIRA", "ref": "RBT-1", "url": "",
-             "states": ["to-deploy"], "times": {}, "links": []},
+            attention._item("ISSUE", container="o/r", ref="r#1", states=["waiting"], links=["o/r#2"]),
+            attention._item("MY PR", container="o/r", ref="r#2", states=["waiting"],
+                            jira="https://x/browse/RBT-1"),
+            attention._item("JIRA", source="jira", ref="RBT-1", states=["to-deploy"]),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual(refs(view, "ready"), ["RBT-1"])
@@ -366,10 +357,9 @@ class Clustering(unittest.TestCase):
                          ["r#1", "r#2"])
     def test_header_jira_ticket_is_not_repeated_as_child(self):
         items = [
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#5",
-             "url": "", "states": ["ready"], "times": {}, "jira": "https://x/browse/ABC-1"},
-            {"source": "jira", "chip": "JIRA", "ref": "ABC-1", "url": "",
-             "states": ["in-progress"], "times": {}},
+            attention._item("MY PR", container="o/r", ref="r#5", states=["ready"],
+                            jira="https://x/browse/ABC-1"),
+            attention._item("JIRA", source="jira", ref="ABC-1", states=["in-progress"]),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual(find(view, "r#5")["children"], [])
@@ -426,13 +416,13 @@ class ClosedLog(unittest.TestCase):
         """A merged PR and the open item it links to stay one card; the merged
         state ranks above waiting, so the card moves to Ready."""
         closed = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2", "url": "",
-             "states": ["closed"], "times": {"updated": "2026-09-29T09:01:00Z"}, "links": ["o/r#5"]},
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#5", "url": "",
-             "states": ["merged"], "times": {"updated": "2026-09-29T09:00:00Z"}, "links": ["o/r#2"]},
+            attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
+                            times={"updated": "2026-09-29T09:01:00Z"}, links=["o/r#5"]),
+            attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
+                            times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#2"]),
         ]
-        open_items = [{"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#9", "url": "",
-                       "states": ["waiting"], "times": {}, "links": ["o/r#5"]}]
+        open_items = [attention._item("ISSUE", container="o/r", ref="r#9", states=["waiting"],
+                                      links=["o/r#5"])]
         view = attention.build_view(open_items, now=NOW, closed=closed)
         self.assertEqual(view["closed"], [])
         cards = {t["key"]: t["items"] for t in view["tiers"]}
@@ -442,18 +432,18 @@ class ClosedLog(unittest.TestCase):
     def test_section_only_move_does_not_repeat_the_tier(self):
         """A card coming back out of the closed log has the same state and tier;
         the label must not read 'Waiting on others → Waiting on others'."""
-        merged = {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#7",
-                  "url": "", "states": ["merged"], "times": {"updated": "2026-09-29T09:00:00Z"}}
+        merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
+                                 times={"updated": "2026-09-29T09:00:00Z"})
         before = attention.payload(attention.build_view([], now=NOW, closed=[merged]), now=NOW)
         after = attention.payload(attention.build_view([dict(merged, links=["o/r#7"])], now=NOW), previous=before)
         self.assertEqual(after["changes"]["items"]["o/r#7"]["label"], "moved")
 
     def test_all_closed_cluster_stays_in_the_closed_log(self):
         closed = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2", "url": "",
-             "states": ["closed"], "times": {"updated": "2026-09-29T09:01:00Z"}, "links": ["o/r#5"]},
-            {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#5", "url": "",
-             "states": ["merged"], "times": {"updated": "2026-09-29T09:00:00Z"}, "links": ["o/r#2"]},
+            attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
+                            times={"updated": "2026-09-29T09:01:00Z"}, links=["o/r#5"]),
+            attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
+                            times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#2"]),
         ]
         view = attention.build_view([], now=NOW, closed=closed)
         self.assertEqual([t["items"] for t in view["tiers"]], [[], [], []])
@@ -464,12 +454,11 @@ class ClosedLog(unittest.TestCase):
     def test_merged_pr_lifts_its_ticket_to_ready(self):
         """The ticket a merged PR names is shown inline on the card, and the
         merged PR is the header: the pair does not fall apart into Waiting."""
-        ticket = {"source": "jira", "chip": "JIRA", "ref": "FIRE-1", "url": "",
-                  "states": ["in-progress"], "times": {"updated": "2026-09-29T09:00:00Z"}}
-        merged = {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#7",
-                  "url": "", "states": ["merged"],
-                  "times": {"updated": "2026-09-29T09:30:00Z"},
-                  "jira": attention.JIRA_BASE + "FIRE-1"}
+        ticket = attention._item("JIRA", source="jira", ref="FIRE-1", states=["in-progress"],
+                                 times={"updated": "2026-09-29T09:00:00Z"})
+        merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
+                                 times={"updated": "2026-09-29T09:30:00Z"},
+                                 jira=attention.JIRA_BASE + "FIRE-1")
         view = attention.build_view([ticket], now=NOW, closed=[merged])
         cards = [i for t in view["tiers"] for i in t["items"]]
         self.assertEqual(len(cards), 1)
@@ -480,12 +469,11 @@ class ClosedLog(unittest.TestCase):
         self.assertEqual(view["closed"], [])
 
     def test_closed_bucket_is_newest_first_and_not_in_tiers(self):
-        open_items = [{"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#1",
-                       "url": "", "states": ["ready"], "times": {}}]
-        closed = [{"source": "github", "chip": "MY PR", "container": "o/r", "ref": "r#2", "url": "",
-                   "states": ["merged"], "times": {"updated": "2026-09-29T11:00:00Z"}},
-                  {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#3", "url": "",
-                   "states": ["closed"], "times": {"updated": "2026-09-29T05:00:00Z"}}]
+        open_items = [attention._item("MY PR", container="o/r", ref="r#1", states=["ready"])]
+        closed = [attention._item("MY PR", container="o/r", ref="r#2", states=["merged"],
+                                  times={"updated": "2026-09-29T11:00:00Z"}),
+                  attention._item("ISSUE", container="o/r", ref="r#3", states=["closed"],
+                                  times={"updated": "2026-09-29T05:00:00Z"})]
         view = attention.build_view(open_items, now=NOW, closed=closed)
         self.assertEqual([r["ref"] for r in view["closed"]], ["r#2", "r#3"])
         self.assertEqual([r["ref"] for t in view["tiers"] for r in t["items"]], ["r#1"])
@@ -537,8 +525,7 @@ class AssignedIssues(unittest.TestCase):
                 "updatedAt": "2026-09-29T10:00:00Z", "createdAt": "2026-09-29T09:00:00Z"}
         item = attention._issue_item(view, ["not-started"], [], {})
         self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-993")
-        jira = {"source": "jira", "chip": "JIRA", "ref": "RBT-993", "url": "",
-                "states": ["waiting"], "times": {}, "links": []}
+        jira = attention._item("JIRA", source="jira", ref="RBT-993", states=["waiting"])
         built = attention.build_view([item, jira], now=NOW)
         # one card, headed by the issue; the Jira ticket is shown inline, not as child.
         self.assertEqual([r["ref"] for r in built["tiers"][0]["items"]], ["PLS-rubin#2330"])
@@ -549,17 +536,17 @@ class AssignedIssues(unittest.TestCase):
         self.assertEqual(states, ["needs-reply"])
         states, prs = attention.issue_states({"comments": []}, {}, ME)
         self.assertEqual(states, ["not-started"])
-        view = attention.build_view([{"source": "github", "ref": "r#1", "states": states, "times": {}}], now=NOW)
+        view = attention.build_view([attention._item("", ref="r#1", states=states)], now=NOW)
         self.assertEqual(view["tiers"][0]["items"][0]["ref"], "r#1")
 
 
 class OrderingAndErrors(unittest.TestCase):
     def test_stalest_member_is_header_across_time_offsets(self):
         items = [
-            {"source": "github", "chip": "ISSUE", "container": "o/r", "ref": "r#2330",
-             "url": "", "states": ["waiting-reply"], "times": {"updated": "2026-09-29T12:58:59Z"}},
-            {"source": "jira", "chip": "JIRA", "ref": "RBT-993", "url": "", "states": ["in-progress"],
-             "times": {"updated": "2026-09-29T14:00:47.547+02:00"}, "links": ["o/r#2330"]},
+            attention._item("ISSUE", container="o/r", ref="r#2330", states=["waiting-reply"],
+                            times={"updated": "2026-09-29T12:58:59Z"}),
+            attention._item("JIRA", source="jira", ref="RBT-993", states=["in-progress"],
+                            times={"updated": "2026-09-29T14:00:47.547+02:00"}, links=["o/r#2330"]),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual([r["ref"] for r in view["tiers"][2]["items"]], ["RBT-993"])
@@ -567,17 +554,22 @@ class OrderingAndErrors(unittest.TestCase):
 
     def test_tier_order_is_chronological_across_time_offsets(self):
         items = [
-            {"ref": "newer", "states": ["waiting"], "times": {"updated": "2026-09-29T12:58:59Z"}},
-            {"ref": "older", "states": ["waiting"], "times": {"updated": "2026-09-29T14:00:47.547+02:00"}},
+            attention._item("", ref="newer", states=["waiting"],
+                            times={"updated": "2026-09-29T12:58:59Z"}),
+            attention._item("", ref="older", states=["waiting"],
+                            times={"updated": "2026-09-29T14:00:47.547+02:00"}),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual([r["ref"] for r in view["tiers"][2]["items"]], ["older", "newer"])
 
     def test_stalest_activity_first_within_tier(self):
         items = [
-            {"ref": "a", "states": ["review-requested"], "times": {"updated": "2026-09-29T10:00:00Z"}},
-            {"ref": "b", "states": ["review-requested"], "times": {"updated": "2026-09-20T10:00:00Z"}},
-            {"ref": "c", "states": ["review-requested"], "times": {"updated": "2026-09-25T10:00:00Z"}},
+            attention._item("", ref="a", states=["review-requested"],
+                            times={"updated": "2026-09-29T10:00:00Z"}),
+            attention._item("", ref="b", states=["review-requested"],
+                            times={"updated": "2026-09-20T10:00:00Z"}),
+            attention._item("", ref="c", states=["review-requested"],
+                            times={"updated": "2026-09-25T10:00:00Z"}),
         ]
         view = attention.build_view(items, now=NOW)
         self.assertEqual([r["ref"] for r in view["tiers"][0]["items"]], ["b", "c", "a"])
@@ -744,9 +736,9 @@ class SnapshotContract(unittest.TestCase):
     """The shared JSON: stable keys, raw times, and the change block."""
 
     def item(self, num, state, title=None):
-        return {"source": "github", "container": "o/r", "ref": f"o/r#{num}",
-                "title": title or f"pr {num}", "url": f"https://x/{num}",
-                "states": [state], "times": {"updated": "2026-09-28T12:00:00Z"}}
+        return attention._item("", container="o/r", ref=f"o/r#{num}", title=title or f"pr {num}",
+                               url=f"https://x/{num}", states=[state],
+                               times={"updated": "2026-09-28T12:00:00Z"})
 
     def view(self, items):
         return attention.build_view(items, now=NOW)
@@ -789,8 +781,8 @@ class SnapshotContract(unittest.TestCase):
 
     def test_second_state_moving_a_row_labels_the_tier_move(self):
         def it(states):
-            return {"source": "github", "container": "o/r", "ref": "o/r#1",
-                    "states": states, "times": {"updated": "2026-09-28T12:00:00Z"}}
+            return attention._item("", container="o/r", ref="o/r#1", states=states,
+                                   times={"updated": "2026-09-28T12:00:00Z"})
         before = attention.payload(self.view([it(["waiting-reply"])]), now=NOW)
         after = attention.payload(self.view([it(["waiting-reply", "conflicts"])]), previous=before, now=NOW)
         self.assertEqual(after["changes"]["items"]["o/r#1"]["label"],
@@ -830,9 +822,9 @@ class SnapshotContract(unittest.TestCase):
 
     def test_change_annotation_survives_leaving_the_tiers(self):
         before = attention.payload(self.view([self.item(1, "needs-comments")]), now=NOW)
-        merged = {"source": "github", "chip": "MY PR", "container": "o/r", "ref": "o/r#1",
-                  "title": "pr 1", "url": "https://x/1", "states": ["merged"],
-                  "times": {"updated": "2026-09-28T12:00:00Z"}}
+        merged = attention._item("MY PR", container="o/r", ref="o/r#1", title="pr 1",
+                                 url="https://x/1", states=["merged"],
+                                 times={"updated": "2026-09-28T12:00:00Z"})
         after = attention.payload(attention.build_view([], now=NOW, closed=[merged]), previous=before, now=NOW)
         self.assertEqual(after["changes"]["items"]["o/r#1"]["to_state"], "merged")
         self.assertEqual(after["changes"]["summary"], {"new": 0, "moved": 1, "gone": 0})
@@ -840,9 +832,9 @@ class SnapshotContract(unittest.TestCase):
     def test_closed_cards_are_never_new(self):
         """A PR that closes while you are away enters Recently closed for the
         first time — that is a closure, not a new card."""
-        reviewed = {"source": "github", "chip": "REVIEWED", "container": "o/r", "ref": "o/r#9",
-                    "title": "pr 9", "url": "https://x/9", "states": ["merged"],
-                    "times": {"updated": "2026-09-28T11:00:00Z"}}
+        reviewed = attention._item("REVIEWED", container="o/r", ref="o/r#9", title="pr 9",
+                                   url="https://x/9", states=["merged"],
+                                   times={"updated": "2026-09-28T11:00:00Z"})
         after = attention.payload(attention.build_view([], now=NOW, closed=[reviewed]), now=NOW)
         row = after["closed"][0]
         self.assertEqual(row["section"], "closed")

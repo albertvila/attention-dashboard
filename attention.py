@@ -53,7 +53,6 @@ STATES = {
     "waiting": (WAITING, "waiting", "quiet"),
     "waiting-reply": (WAITING, "waiting reply", "quiet"),
     "in-progress": (WAITING, "in progress", "info"),
-    "reviewed": (WAITING, "reviewed", "info"),
     "closed": (WAITING, "closed", "quiet"),
 }
 
@@ -1245,21 +1244,18 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def send_json(self, snapshot):
-        body = json.dumps(snapshot).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self.send_body(json.dumps(snapshot).encode(), "application/json")
 
     def send_file(self, path, ctype):
         try:
             with open(path, "rb") as fh:
                 body = fh.read()
         except OSError as e:
-            body = f"file not found: {e}".encode()
-            ctype = "text/plain; charset=utf-8"
+            body, ctype = f"file not found: {e}".encode(), "text/plain; charset=utf-8"
+        self.send_body(body, ctype)
+
+    def send_body(self, body, ctype):
+        """One place to write a response."""
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
