@@ -7,159 +7,177 @@
   ghosts, folds, parking) comes from attention-view.js, so no attention rule
   lives in this file.
 
-  Serve it with the producer (http://127.0.0.1:8765/) so it always has fresh
-  data, or statically:
-    python3 attention.py --json attention.json
-    python3 -m http.server
-  then open /dashboard.html — or ?data=<url> to point it at another snapshot.
+  Served by the producer (http://127.0.0.1:8765/). `?data=<url>` renders a
+  static snapshot instead: no refresh, no parking.
 -->
-<html lang="en">
-<head>
-<meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8"><title>Attention dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Attention dashboard</title>
 <style>
-  :root{
-    --ink:#1a1a1a; --muted:#6b6b6b; --line:#e4e4e4; --bg:#fafafa;
-    --accent:#0a6cff;
-    --amber:#9a6400; --amber-bg:#fff4e0; --amber-line:#efd9ae;
-    --red:#b3261e; --red-bg:#fdecea; --red-line:#f2c4bf;
-    --green:#1a7f37; --green-bg:#e9f5ec; --green-line:#c6e2ce;
-    --blue-bg:#e9f1ff; --blue-line:#c8dcff;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);padding-bottom:96px}
-  .banner{background:#fff8dc;border-bottom:1px solid #eadfa8;padding:10px 24px;font-size:13px;color:#5c5310}
-  .banner .cmp{font-weight:600}
-  .banner code{background:#00000010;padding:0 4px;border-radius:4px}
-  .banner button{font:inherit;font-size:12px;margin-left:8px;border:1px solid #d8c98a;background:#fffdf3;color:#5c5310;border-radius:6px;padding:2px 8px;cursor:pointer}
-  .wrap{max-width:1120px;margin:0 auto;padding:18px 24px 40px}
-  h1{font-size:20px;margin:14px 0 2px}
-  h2.sec{font-size:12.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:26px 0 8px;display:flex;justify-content:space-between;align-items:baseline}
-  h2.sec .count{text-transform:none;letter-spacing:0;font-weight:400}
-  .row{display:flex;align-items:baseline;gap:8px;padding:9px 6px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-  .row:hover{background:#fff}
-  .row.draft{border-style:dashed;opacity:.72}
-  .row.draft:hover{opacity:1}
-  .row .title{flex:1;min-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .row .title a{color:inherit;text-decoration:none}
-  .row .title a:hover{text-decoration:underline}
-  .row .meta{color:var(--muted);font-size:12.5px}
-  /* Change is a row-level, transient fact: a coloured edge plus plain meta text,
-     never another chip next to the item's own states and facts. */
-  .row.chg-new{border-left:3px solid var(--green)}
-  .row.chg-moved{border-left:3px solid var(--amber)}
-  .row.chg-moved.out{border-left-color:var(--green)}
-  .row.chg-gone{border-left:3px solid #d0d0d0;opacity:.5}
-  .row.chg-gone .title{text-decoration:line-through}
-  .chg{font-weight:600;font-size:12.5px}
-  .chg.new{color:var(--green)}
-  .chg.moved{color:var(--amber)}
-  .chg.moved.out{color:var(--green)}
-  .chg.gone{color:var(--muted)}
-  .kid{display:flex;align-items:baseline;gap:8px;padding:3px 6px 3px 26px;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
-  .kid a{color:var(--muted);text-decoration:none}
-  .kid a:hover{text-decoration:underline}
-  .kid .chip{font-size:11px}
-  .chip{font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap;flex:none}
-  .chip.warn{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
-  .chip.bad{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
-  .chip.good{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
-  .chip.info{color:var(--accent);background:var(--blue-bg);border-color:var(--blue-line)}
-  .chip.quiet{color:var(--muted);background:#f1f1f1;border-color:#e2e2e2}
-  .chip.src{color:#555;background:#fff;border-color:#ddd}
-  .gh-label{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;border:1px solid #00000033}
-  .avatar{width:16px;height:16px;border-radius:50%;vertical-align:-3px;margin-right:3px;background:var(--line)}
-  .author{color:var(--muted);text-decoration:none}
-  .author:hover{color:var(--ink);text-decoration:underline}
-  .hidden-note,.empty{font-size:12.5px;color:var(--muted);padding:5px 6px 0}
-  .empty{font-size:13px;padding:6px}
-  .err{border:1px solid var(--red-line);border-radius:8px;background:var(--red-bg);padding:10px 12px;margin:8px 0}
-  .err b{color:var(--red)}
-  .err pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;max-height:180px;overflow:auto}
-  .fold{margin:0 0 8px}
-  .fold summary{cursor:pointer;font-size:13px;color:var(--muted);margin:18px 0 6px;padding:6px 10px;border:1px dashed var(--line);border-radius:8px;background:#fff}
-  .fold[open] summary{margin-bottom:6px}
-  .help{margin:0;padding:0 0 0 18px;color:var(--muted);font-size:12.5px;max-width:980px}
-  .help li{margin:5px 0}
-  /* Always visible (a hover-only control is undiscoverable), but quiet until the
-     row is hovered. */
-  .stalewarn{color:var(--red);font-weight:600}
-  .snooze{flex:none}
-  .snooze select,.snooze button{font:inherit;font-size:11px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:6px;padding:1px 5px;cursor:pointer}
-  .row:hover .snooze select,.row:hover .snooze button{border-color:var(--line);background:#fff;color:var(--ink)}
-  .wakeat{color:var(--muted);font-size:11px;margin-left:4px}
-  .row.snoozed{opacity:.5}
-  .missing{background:#fff;border:1px solid var(--red-line);border-radius:10px;padding:16px 18px;margin:20px 0}
-  .missing b{color:var(--red)}
-  .missing pre{background:#f6f6f6;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto}
-</style>
-</head>
-<body>
-  <div class="banner">
-    Rendering the shared snapshot — <span class="cmp" id="cmp">loading…</span>
-    <span class="stalewarn" id="stale"></span>
-    <button id="refresh" title="Run the producer now — live gh/twg collection, ~20s">refresh</button>
-  </div>
-  <div class="wrap" id="app"></div>
-
+:root{color-scheme:light dark}
+body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#0d1117;color:#e6edf3}
+header{position:sticky;top:0;background:#161b22;border-bottom:1px solid #30363d;padding:12px 20px;display:flex;gap:12px;align-items:baseline}
+h1{font-size:15px;margin:0;font-weight:600}
+button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 12px;cursor:pointer;font:inherit}
+button:hover{background:#30363d}
+#stamp{color:#8b949e;font-size:12px}
+main{max-width:940px;margin:0 auto;padding:16px 20px 60px}
+section{margin:22px 0}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}
+.row{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid #30363d;border-radius:8px;background:#161b22;margin-bottom:6px}
+.chip{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:4px;background:#30363d;color:#c9d1d9}
+.chip.REVIEW{background:#1f6feb33;color:#79c0ff}
+.chip.REVIEWED{background:#58a6ff22;color:#79c0ff}
+.chip.MY{background:#23863633;color:#7ee787}
+.chip.ISSUE{background:#d2992233;color:#e3b341}
+.chip.JIRA{background:#8957e533;color:#d2a8ff}
+.chip.MAIL{background:#39c5cf22;color:#76e3ea}
+/* Always visible (a hover-only control is undiscoverable), but quiet until the
+   row is hovered. */
+.snooze{flex:0 0 auto}
+.snooze select,.snooze button{font:inherit;font-size:11px;background:transparent;color:#6e7681;border:1px solid transparent;border-radius:6px;padding:1px 6px;cursor:pointer}
+.row:hover .snooze select,.row:hover .snooze button{background:#21262d;color:#c9d1d9;border-color:#30363d}
+.wakeat{color:#6e7681;font-size:11px;margin-left:4px}
+.row.snoozed{opacity:.5}
+.help{margin:0;padding:0 0 0 18px;color:#8b949e;font-size:12.5px;max-width:940px}
+.help li{margin:5px 0}
+.body{flex:1;min-width:0}
+.title{font-weight:600}
+.title a{color:#e6edf3;text-decoration:none}
+.title a:hover{text-decoration:underline}
+.meta{color:#8b949e;font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+.avatar{width:16px;height:16px;border-radius:50%;vertical-align:-3px;margin-right:4px;background:#30363d}
+.author,.repo{color:#8b949e;text-decoration:none}
+.author:hover,.repo:hover{color:#e6edf3;text-decoration:underline}
+.jira{color:#79c0ff;text-decoration:none}
+.jira:hover{text-decoration:underline}
+.jira-line{margin-top:4px;font-size:12px;overflow-wrap:anywhere}
+.jira-type{color:#8b949e;margin-left:6px;font-size:11px}
+.jira-summary{color:#c9d1d9;margin-left:6px}
+.badge.wip{background:#d299221f;color:#e3b341;border-color:#d2992255}
+.labels{margin-top:4px}
+.fact{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;border:1px solid;margin-left:4px;vertical-align:1px}
+.fact.ok{color:#7ee787;border-color:#3fb95055;background:#3fb95011}
+.fact.bad{color:#ff7b72;border-color:#f8514955;background:#f8514911}
+.fact.warn{color:#e3b341;border-color:#d2992255;background:#d2992211}
+.fact.waiting{color:#8b949e;border-color:#8b949e55;background:#8b949e11}
+.gh-label{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;margin:0 4px 2px 0;border:1px solid #00000033}
+.children{margin-top:6px;border-left:2px solid #30363d;padding-left:10px}
+.child{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px;flex-wrap:wrap}
+.child a{color:#8b949e;text-decoration:none}
+.child a:hover{color:#e6edf3;text-decoration:underline}
+.child .gh-label{font-size:9px;padding:0 6px}
+.child .fact{font-size:9px;padding:0 6px}
+.child-detail{color:#8b949e;font-size:11px}
+.chip.mini{font-size:9px;padding:1px 5px}
+.child-age{margin-left:auto;color:#6e7681;font-size:11px}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;margin-left:6px;border:1px solid transparent}
+.badge.needs{background:#f851491f;color:#ff7b72;border-color:#f8514955}
+.badge.ready{background:#3fb9501f;color:#7ee787;border-color:#3fb95055}
+.badge.waiting{background:#8b949e1f;color:#8b949e;border-color:#8b949e55}
+.badge.draft{background:#8b949e26;color:#c9d1d9;border-color:#8b949e88;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.row.draft{border-style:dashed;opacity:.72}
+.row.draft:hover{opacity:1}
+/* Change is a row-level, transient fact: a coloured edge plus plain meta text,
+   never another chip next to the item's own states and facts. */
+.row.chg-new{border-left:3px solid #3fb950}
+.row.chg-moved{border-left:3px solid #d29922}
+.row.chg-moved.out{border-left-color:#3fb950}
+.chg.moved.out{color:#7ee787}
+.row.chg-gone{border-left:3px solid #6e7681;opacity:.5}
+.row.chg-gone .title a{text-decoration:line-through}
+.chg{font-weight:600}
+.chg.new{color:#7ee787}
+.chg.moved{color:#e3b341}
+.chg.moved.out{color:#7ee787}
+.chg.gone{color:#8b949e}
+details.fold{margin:0 0 8px}
+details.fold summary{cursor:pointer;font-size:12px;color:#8b949e;padding:6px 10px;border:1px dashed #30363d;border-radius:8px;background:#161b22;list-style-position:inside}
+details.fold[open] summary{margin-bottom:6px}
+.age{flex:0 0 auto;color:#8b949e;font-size:12px}
+.empty{color:#6e7681;font-size:13px;padding:4px 2px}
+.hidden{color:#8b949e;font-size:12px;margin-top:6px}
+.err{border:1px solid #f85149;border-radius:8px;background:#f8514911;padding:10px 12px;margin-bottom:8px}
+.err b{color:#ff7b72}
+pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;color:#c9d1d9;max-height:180px;overflow:auto}
+</style></head><body>
+<header><h1>Attention</h1><button id="refresh">Refresh</button><span id="stamp">loading…</span></header>
+<main id="app"></main>
 <script src="attention-view.js"></script>
 <script>
-/* ============================== the contract ==============================
-   Everything below reads rows as the JSON snapshot defines them:
-   {chip,key,title,ref,url,author,jira,container,labels,
-    states:[{key,label,tier,tone}], facts:[{label,tone}], detail, age, times,
-    tier, children:[...], change:{kind,label,from_*,to_*}}
-   and changes:{previousAt, summary, items, gone:[row+section]}.
-   No state/age/tier computation here — that is the producer's job.         */
+const app = document.getElementById('app');
+const stamp = document.getElementById('stamp');
+/* The rules live in attention-view.js, shared with the dsh panel: this page
+   only renders what the overlay hands it. */
 const params = new URLSearchParams(location.search);
-
-let DATA = null;
-
-/* ================================ helpers ================================ */
-function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function tone(t){ return ({ok:'good',bad:'bad',warn:'warn',info:'info'}[t]) || 'quiet'; }
-function chipTone(chip){ return chip==='MY PR' ? 'good' : chip==='ISSUE' ? 'warn' : (chip==='JIRA'||chip==='MAIL') ? 'info' : 'src'; }
-function short(repo){ return esc(String(repo||'').replace('Launchmetrics/','')); }
-function labelChip(l){
-  const hex = String(l.color||'').replace('#','').padEnd(6,'0');
-  const r=parseInt(hex.slice(0,2),16)||0, g=parseInt(hex.slice(2,4),16)||0, b=parseInt(hex.slice(4,6),16)||0;
-  return `<span class="gh-label" style="background:#${hex};color:${(0.299*r+0.587*g+0.114*b)>150?'#24292f':'#ffffff'}">${esc(l.name)}</span>`;
-}
-
-/* Shown at the end of the page: the two things you have to know to use it
-   (where mail comes from, how to merge cards) and where parking goes. */
-const HELP = [
-  'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Mail fold instead of the tiers. Un-star one to clear it; nothing here changes your mail.',
-  'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, merged work whose ticket may still need closing). Waiting on others: you handed off (PRs awaiting review, tickets in progress or with support, mail you answered).',
-  'Grouping — two ways: a Jira key or GitHub ref links items into one card automatically (a merged PR stays with its ticket and lifts the card to Ready), and a group/&lt;name&gt; label merges threads that share nothing but the topic. The top line of a card is its most urgent member; the rest are children.',
-  'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped (struck through, and hidden in Needs you now).',
-  'Parking — the picker on each card snoozes it (4 hours / 1 day / 3 days / 1 week) or acknowledges it (until it changes). Shared with the other dashboards; the snapshot itself is untouched.'
-];
-function helpHtml(){
-  return `<details class="fold"><summary>How this queue works</summary><ul class="help">${HELP.map(l => `<li>${l}</li>`).join('')}</ul></details>`;
-}
-
-/* "Since I last looked" lives here, not in the producer: the snapshot carries
-   when each row was first seen and last changed, this page carries when its
-   reader last looked. First look flags nothing. */
+const DATA_URL = params.get('data');     // static mode: ?data=./attention.json
+const noBackend = !!DATA_URL;            // nothing to refresh or park against
 const SEEN_KEY = 'gha.seenAt';
 let seenAt = null;
-try { seenAt = localStorage.getItem(SEEN_KEY); } catch (e) {}
+try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
 let snoozes = {}, acks = {}, status = null, view = null;
-let noBackend = !!params.get('data');    // static ?data= mode: no parking, no refresh
 
-const changeMark = c => c ? `<span class="chg ${view.changeTone(c)}" title="changed since your last look">${esc(view.changeLabel(c))}</span>` : '';
-
-function parkControl(r){
-  if (noBackend) return '';
-  const until = view.snoozeOf(r), acked = view.ackOf(r);
-  if (until || acked)
-    return `<span class="snooze"><button class="wake" onclick="park('${esc(r.key)}','${acked ? 'unack' : '0'}')">${acked ? 'unack' : 'wake'}</button>
-      <span class="wakeat">${acked ? 'until it changes' : esc(view.formatWhen(until))}</span></span>`;
-  return `<span class="snooze"><select onchange="if(this.value) park('${esc(r.key)}', this.value)">
-    <option value="" selected>⏰ snooze / ack</option>
-    ${view.choices.map(c => `<option value="${c.value}">${esc(c.label)}</option>`).join('')}</select></span>`;
+async function load(isRefresh){
+  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
+  try{
+    const src = isRefresh ? '/refresh' : (DATA_URL || '/api/queue');
+    const res = await fetch(src, {cache:'no-store'});
+    const data = await res.json();
+    if(!noBackend){
+      const [snaps, acksRes, statusRes] = await Promise.all([
+        fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'})]);
+      snoozes = await snaps.json().catch(() => ({}));
+      acks = await acksRes.json().catch(() => ({}));
+      status = await statusRes.json().catch(() => null);
+    }
+    view = AttentionView.overlay(data, {seenAt, snoozes, acks});
+    render(data);
+    stamp.textContent = 'snapshot ' + ageOf(data.generatedAt) + ' · ' + view.summaryText();
+    try { localStorage.setItem(SEEN_KEY, data.generatedAt); } catch(e) {}
+  }catch(e){
+    app.innerHTML = '';
+    app.appendChild(errBox({where:'page', command:'GET ' + (DATA_URL || '/api/queue'), output:String(e)}));
+    if(noBackend) app.appendChild(el('div','empty','Static mode renders a snapshot file: write one with  python3 attention.py --json attention.json'));
+    stamp.textContent = 'error';
+  }
+}
+function render(data){
+  app.innerHTML = '';
+  const staleText = AttentionView.staleText(data, status);
+  if(staleText) app.appendChild(el('div','err', staleText));
+  for(const fold of [['Snoozed', view.folds.snoozed, 'wake one to bring it back'],
+                     ['Acknowledged', view.folds.acked, 'hidden until the card changes'],
+                     ['Drafts', view.folds.drafts, 'tests / POCs — collapsed by default'],
+                     ['Recently closed', view.folds.closed, 'last 24h']]){
+    if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
+  }
+  for(const tier of view.tiers){
+    const s = document.createElement('section');
+    const h = document.createElement('h2');
+    h.textContent = tier.title + ' · ' + tier.count;
+    s.appendChild(h);
+    if(!tier.rows.length){ s.appendChild(el('div','empty','Nothing here.')); }
+    for(const it of tier.rows) s.appendChild(row(it));
+    app.appendChild(s);
+  }
+  if(view.folds.mail.length) app.appendChild(foldBox('Mail', view.folds.mail, 'starred threads — collapsed by default'));
+  for(const e of data.errors) app.appendChild(errBox(e));
+  if(data.hidden_bots) app.appendChild(el('div','hidden','+'+data.hidden_bots+' hidden (bot-authored review requests)'));
+  app.appendChild(helpBox([
+    'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Mail fold instead of the tiers. Un-star one to clear it; nothing here changes your mail.',
+    'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, merged work whose ticket may still need closing). Waiting on others: you handed off (PRs awaiting review, tickets in progress or with support, mail you answered).',
+    'Grouping — two ways: a Jira key or GitHub ref links items into one card automatically (a merged PR stays with its ticket and lifts the card to Ready), and a group/<name> label merges threads that share nothing but the topic. The top line of a card is its most urgent member; the rest are children.',
+    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped (struck through, and hidden in Needs you now).',
+    'Parking — the picker on each card snoozes it (4 hours / 1 day / 3 days / 1 week) or acknowledges it (until it changes). Shared with the other dashboards; the snapshot itself is untouched.'
+  ]));
+}
+function foldBox(title, items, note){
+  const d = document.createElement('details');
+  d.className = 'fold';
+  const s = document.createElement('summary');
+  s.textContent = title + ' · ' + items.length + (note ? ' (' + note + ')' : '');
+  d.appendChild(s);
+  for(const it of items) d.appendChild(row(it));
+  return d;
 }
 async function park(key, value){
   const acking = value === 'ack', unacking = value === 'unack';
@@ -167,129 +185,160 @@ async function park(key, value){
     method: 'POST', headers: {'content-type': 'application/json'},
     body: JSON.stringify(acking ? {key} : unacking ? {key, clear: true} : {key, hours: Number(value)})});
   const stored = await res.json();
-  if (acking || unacking) acks = stored; else snoozes = stored;
-  makeView(); render();
+  if(acking || unacking) acks = stored; else snoozes = stored;
+  load();
 }
-function makeView(){
-  view = AttentionView.overlay(DATA, {seenAt, snoozes, acks});
-  return view;
+function parkControl(r){
+  if(noBackend) return el('span','snooze');   // nothing to post parking to
+  const wrap = el('span','snooze');
+  const snoozeUntil = view.snoozeOf(r), ackedAt = view.ackOf(r);
+  if(snoozeUntil || ackedAt){
+    const b = el('button','wake', ackedAt ? 'unack' : 'wake');
+    b.onclick = () => park(r.key, ackedAt ? 'unack' : '0');
+    wrap.appendChild(b);
+    wrap.appendChild(el('span','wakeat', ackedAt ? 'until it changes' : view.formatWhen(snoozeUntil)));
+    return wrap;
+  }
+  const sel = document.createElement('select');
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = '⏰ snooze / ack';
+  sel.appendChild(ph);
+  for(const c of view.choices){
+    const o = document.createElement('option');
+    o.value = c.value; o.textContent = c.label;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { if(sel.value) park(r.key, sel.value); };
+  wrap.appendChild(sel);
+  return wrap;
 }
-function meta(r){
-  const ref = r.container
-    ? `${short(r.container)}#${esc(String(r.ref||'').split('#').pop())}`
-    : esc(r.ref || '');
-  const who = r.author
-    ? `<img class="avatar" loading="lazy" alt="" title="by ${esc(r.author)}" src="https://github.com/${encodeURIComponent(r.author)}.png?size=32"><a class="author" href="https://github.com/${encodeURIComponent(r.author)}" target="_blank" rel="noreferrer">${esc(r.author)}</a>`
-    : '';
-  const parts = [ref, who, r.detail && esc(r.detail), r.jira && esc(String(r.jira).split('/').pop())].filter(Boolean);
-  // the ticket a card names is not a child card, so its status/summary ride here
-  if (r.jira_issue) parts.push([r.jira_issue.status, r.jira_issue.type, r.jira_issue.summary]
-    .filter(Boolean).map(esc).join(' · '));
-  return parts.join(' · ');
+const ageOf = iso => {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? Math.floor(s/60) + 'm ago'
+       : s < 86400 ? Math.floor(s/3600) + 'h ago' : Math.floor(s/86400) + 'd ago';
+};
+function chipClass(c){return c==='REVIEW'?'REVIEW':c==='ISSUE'?'ISSUE':c==='JIRA'?'JIRA':c==='MAIL'?'MAIL':c==='REVIEWED'?'REVIEWED':'MY';}
+function row(it){
+  const chg = view.flag(it);
+  const r = el('div','row' + (it.draft ? ' draft' : '') + view.changeClass(chg)
+                     + (view.parked(it) ? ' snoozed' : ''));
+  const chip = el('span','chip '+chipClass(it.chip), it.chip);
+  r.appendChild(chip);
+  const b = el('div','body');
+  const t = el('div','title');
+  const a = document.createElement('a');
+  a.href = it.url; a.target = '_blank'; a.rel='noreferrer'; a.textContent = it.title;
+  t.appendChild(a);
+  for(const st of it.states){ const bg = el('span','badge '+st.tier, st.label); t.appendChild(bg); }
+  if(it.draft) t.appendChild(el('span','badge draft','draft'));
+  b.appendChild(t);
+  const m = el('div','meta');
+  if(chg){
+    m.appendChild(el('span','chg ' + view.changeTone(chg), view.changeLabel(chg)));
+    m.appendChild(document.createTextNode(' · '));
+  }
+  if(it.author){
+    const img = document.createElement('img');
+    img.className='avatar'; img.loading='lazy'; img.alt=''; img.title='by '+it.author;
+    img.src='https://github.com/'+encodeURIComponent(it.author)+'.png?size=32';
+    m.appendChild(img);
+    const who = document.createElement('a');
+    who.className='author'; who.target='_blank'; who.rel='noreferrer'; who.textContent=it.author;
+    who.href='https://github.com/'+encodeURIComponent(it.author);
+    m.appendChild(who);
+    m.appendChild(document.createTextNode(' · '));
+  }
+  const refParts = it.ref.split('#');
+  if(it.container){
+    const repo = document.createElement('a');
+    repo.className='repo'; repo.target='_blank'; repo.rel='noreferrer';
+    repo.href='https://github.com/'+it.container; repo.textContent=refParts[0];
+    m.appendChild(repo);
+    m.appendChild(document.createTextNode('#'+refParts[1]));
+  }else{
+    m.appendChild(document.createTextNode(it.ref));
+  }
+  for(const f of (it.facts||[])) m.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
+  if(it.detail) m.appendChild(document.createTextNode(' · ' + it.detail));
+  b.appendChild(m);
+  if(it.jira){
+    const jr = el('div','jira-line');
+    const j = document.createElement('a');
+    j.className='jira'; j.href=it.jira; j.target='_blank'; j.rel='noreferrer';
+    j.textContent=it.jira.split('/').pop();
+    jr.appendChild(j);
+    if(it.jira_issue){
+      if(it.jira_issue.type) jr.appendChild(el('span','jira-type', it.jira_issue.type));
+      if(it.jira_issue.status){
+        const cat = (it.jira_issue.status_category||'').toLowerCase();
+        const t = cat==='done'?'ready':cat==='in progress'?'wip':'waiting';
+        jr.appendChild(el('span','badge '+t, it.jira_issue.status));
+      }
+      if(it.jira_issue.summary) jr.appendChild(el('span','jira-summary', it.jira_issue.summary));
+    }
+    b.appendChild(jr);
+  }
+  if(it.labels && it.labels.length){
+    const ls = el('div','labels');
+    for(const l of it.labels) ls.appendChild(labelChip(l));
+    b.appendChild(ls);
+  }
+  if(it.children && it.children.length){
+    const kids = el('div','children');
+    for(const c of it.children){
+      const k = el('div','child');
+      k.appendChild(el('span','chip mini '+chipClass(c.chip), c.chip));
+      const a = document.createElement('a');
+      a.href=c.url; a.target='_blank'; a.rel='noreferrer';
+      a.textContent = c.ref || c.title || '';
+      a.title = c.title || c.ref || '';
+      k.appendChild(a);
+      for(const st of c.states) k.appendChild(el('span','badge '+st.tier, st.label));
+      const cchg = view.flag(c);
+      if(cchg) k.appendChild(el('span','chg ' + view.changeTone(cchg), view.changeLabel(cchg)));
+      for(const f of (c.facts||[])) k.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
+      for(const l of (c.labels||[])) k.appendChild(labelChip(l));
+      if(c.detail) k.appendChild(el('span','child-detail', c.detail));
+      if(c.age) k.appendChild(el('span','child-age', c.age));
+      kids.appendChild(k);
+    }
+    b.appendChild(kids);
+  }
+  r.appendChild(b);
+  r.appendChild(el('div','age', it.age));
+  r.appendChild(parkControl(it));
+  return r;
 }
-function rowHtml(r){
-  const chg = view.flag(r);
-  const kids = (r.children||[]).map(c => `<div class="kid">
-      <span class="chip ${chipTone(c.chip)}">${esc(c.chip)}</span>
-      <a href="${esc(c.url||'#')}" target="_blank" rel="noreferrer" title="${esc(c.title || c.ref || '')}">${esc(c.ref || c.title || '')}</a>
-      ${(c.states||[]).map(s=>`<span class="chip ${tone(s.tone)}">${esc(s.label)}</span>`).join('')}
-      ${(c.facts||[]).map(f=>`<span class="chip ${tone(f.tone)}">${esc(f.label)}</span>`).join('')}
-      ${(c.labels||[]).map(labelChip).join('')}
-      ${changeMark(view.flag(c))}
-      ${c.detail ? `<span class="meta">${esc(c.detail)}</span>` : ''}
-      ${c.age ? `<span class="meta">${esc(c.age)}</span>` : ''}
-    </div>`).join('');
-  return `<div class="row${view.changeClass(chg)}${r.draft ? ' draft' : ''}${view.parked(r) ? ' snoozed' : ''}">
-    <span class="chip ${chipTone(r.chip)}">${esc(r.chip)}</span>
-    <span class="title"><a href="${esc(r.url||'#')}" target="_blank" rel="noreferrer">${esc(r.title)}</a></span>
-    ${(r.states||[]).map(s=>`<span class="chip ${tone(s.tone)}">${esc(s.label)}</span>`).join('')}
-    ${(r.facts||[]).map(f=>`<span class="chip ${tone(f.tone)}">${esc(f.label)}</span>`).join('')}
-    ${(r.labels||[]).map(labelChip).join('')}
-    <span class="meta">${changeMark(chg)}${chg ? ' · ' : ''}${meta(r)}</span>
-    <span class="meta">${esc(r.age||'')}</span>
-    ${parkControl(r)}
-  </div>${kids}`;
+function helpBox(lines){
+  const d = document.createElement('details');
+  d.className = 'fold';
+  const s = document.createElement('summary');
+  s.textContent = 'How this queue works';
+  d.appendChild(s);
+  const ul = document.createElement('ul');
+  ul.className = 'help';
+  for(const line of lines) ul.appendChild(el('li', null, line));
+  d.appendChild(ul);
+  return d;
 }
-function tierHtml(t){
-  const rows = t.rows;
-  return `<h2 class="sec"><span>${esc(t.title)}</span><span class="count">${t.count}</span></h2>`
-    + (rows.length ? rows.map(rowHtml).join('') : '<div class="empty">Nothing here.</div>');
-}
-function fold(title, rows){
-  if (!rows.length) return '';
-  return `<details class="fold"><summary>${esc(title)} · ${rows.length}</summary>${rows.map(rowHtml).join('')}</details>`;
-}
-/* Parked buckets, then mail, then the log — the same order as the other surfaces. */
-function foldHtml(){
-  return fold('Snoozed', view.folds.snoozed)
-    + fold('Acknowledged', view.folds.acked)
-    + fold('Mail · starred threads', view.folds.mail)
-    + fold('Drafts', view.folds.drafts)
-    + fold('Recently closed', view.folds.closed);
+function labelChip(l){
+  const hex = (l.color||'').replace('#','').padEnd(6,'0');
+  const r=parseInt(hex.slice(0,2),16)||0, g=parseInt(hex.slice(2,4),16)||0, bl=parseInt(hex.slice(4,6),16)||0;
+  const s = el('span','gh-label',l.name);
+  s.style.background='#'+hex;
+  s.style.color=(0.299*r+0.587*g+0.114*bl)>150?'#24292f':'#ffffff';
+  return s;
 }
 function errBox(e){
-  return `<div class="err"><b>${esc(e.where)}</b> — a call failed`
-    + (e.command ? `<pre>${esc(e.command)}</pre>` : '')
-    + (e.output ? `<pre>${esc(e.output)}</pre>` : '') + '</div>';
+  const d = el('div','err');
+  d.appendChild(el('div',null,e.where + ' — a call failed'));
+  if(e.command) d.appendChild(el('pre',null,e.command));
+  if(e.output) d.appendChild(el('pre',null,e.output));
+  return d;
 }
-function render(){
-  let h = `<h1>Attention</h1>`;
-  for (const t of view.tiers) h += tierHtml(t);
-  h += foldHtml();
-  for (const e of (DATA.errors||[])) h += errBox(e);
-  if (DATA.hidden_bots) h += `<div class="hidden-note">+${DATA.hidden_bots} hidden (bot-authored review requests)</div>`;
-  h += helpHtml();
-  document.getElementById('app').innerHTML = h;
-}
-function missing(src, err){
-  return `<div class="missing">
-    <p><b>No snapshot at ${esc(src)}</b> (${esc(err && err.message || err)}).</p>
-    <p>This page renders the shared JSON contract and holds no data of its own. Generate a snapshot and serve the folder:</p>
-    <pre>python3 attention.py --json attention.json
-python3 -m http.server</pre>
-    <p>or just open <code>http://127.0.0.1:8765/</code> — the producer serves this page and a fresh snapshot.</p>
-  </div>`;
-}
-
-/* ================================ boot ================================== */
-function loading(){
-  document.getElementById('app').innerHTML = '<div class="empty">loading the snapshot — a live collection takes a few seconds…</div>';
-}
-async function load(isRefresh){
-  const src = params.get('data') || './attention.json';
-  const cmp = document.getElementById('cmp');
-  if (isRefresh) cmp.textContent = 'refreshing — live gh/twg collection, ~20s…';
-  try {
-    const res = await fetch(isRefresh ? '/refresh' : src, {cache:'no-store'});
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    DATA = await res.json();
-    if (!noBackend) {
-      const [snaps, ackRes, statusRes] = await Promise.all([
-        fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'})]);
-      snoozes = await snaps.json().catch(() => ({}));
-      acks = await ackRes.json().catch(() => ({}));
-      status = await statusRes.json().catch(() => null);
-    }
-  } catch (e) {
-    cmp.textContent = 'no snapshot';
-    document.getElementById('app').innerHTML = missing(src, e);
-    return;
-  }
-  makeView();
-  const secs = Math.max(0, (Date.now() - Date.parse(DATA.generatedAt)) / 1000);
-  const snapAge = secs < 60 ? 'just now' : secs < 3600 ? Math.floor(secs/60) + 'm ago'
-                : secs < 86400 ? Math.floor(secs/3600) + 'h ago' : Math.floor(secs/86400) + 'd ago';
-  const staleText = AttentionView.staleText(DATA, status);
-  document.getElementById('stale').textContent = staleText ? '· ' + staleText : '';
-  cmp.textContent = `${view.summaryText()} · snapshot ${snapAge} · schema v${DATA.schema}`;
-  render();
-  try { localStorage.setItem(SEEN_KEY, DATA.generatedAt); } catch (e) {}
-}
-
-document.getElementById('refresh').hidden = !!params.get('data');
+function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n;}
+document.getElementById('refresh').hidden = noBackend;
 document.getElementById('refresh').onclick = () => load(true);
-loading();
 load();
-</script>
-</body>
-</html>
+</script></body></html>
+"
