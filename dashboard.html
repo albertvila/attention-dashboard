@@ -132,7 +132,7 @@ details.group summary b{font-weight:600}
 .empty{color:#6e7681;font-size:13px;padding:4px 2px}
 .hidden{color:#8b949e;font-size:12px;margin-top:6px}
 .err{border:1px solid #f85149;border-radius:8px;background:#f8514911;padding:10px 12px;margin-bottom:8px}
-.err b{color:#ff7b72}
+details.err summary{cursor:pointer;color:#ff7b72;font-weight:600}
 pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;color:#c9d1d9;max-height:180px;overflow:auto}
 .help{margin:0;padding:0 0 0 18px;color:#8b949e;font-size:12.5px}
 .help li{margin:5px 0}
@@ -212,6 +212,9 @@ function render(data){
   app.innerHTML = '';
   const staleText = AttentionView.staleText(data, status);
   if(staleText) app.appendChild(el('div','err', staleText));
+  /* A failed source means a smaller queue, not a smaller workload: say so
+     before the tiers, not after the help box. */
+  for(const e of data.errors) app.appendChild(errBox(e, '\u26a0 ' + e.where + ' failed — this queue is partial'));
   for(const tier of view.tiers){
     const s = document.createElement('section');
     s.appendChild(el('h2', null, tier.title + ' · ' + tier.count));
@@ -243,7 +246,6 @@ function render(data){
                      ['Recently closed', view.folds.closed, '']]){
     if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
   }
-  for(const e of data.errors) app.appendChild(errBox(e));
   if(data.hidden_bots) app.appendChild(el('div','hidden','+'+data.hidden_bots+' hidden (bot-authored review requests)'));
   app.appendChild(helpBox([
     'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look, then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
@@ -459,9 +461,9 @@ function labelChip(l){
   s.style.color=(0.299*r+0.587*g+0.114*bl)>150?'#24292f':'#ffffff';
   return s;
 }
-function errBox(e){
-  const d = el('div','err');
-  d.appendChild(el('div',null,e.where + ' — a call failed'));
+function errBox(e, summary){
+  const d = el('details','err');
+  d.appendChild(el('summary', null, summary || (e.where + ' — a call failed')));
   if(e.command) d.appendChild(el('pre',null,e.command));
   if(e.output) d.appendChild(el('pre',null,e.output));
   return d;
