@@ -3,9 +3,9 @@
 
    The producer owns what is true (states, tiers, links, change stamps). This
    owns the layer on top of it: change flags since the reader's last look, ghosts
-   of what left, and what the reader parked (snooze / acknowledge). It is
-   dependency-free and side-effect-free; load it as a classic script and use
-   window.AttentionView.
+   of what left, what the reader parked (snooze / acknowledge), and how the
+   Waiting tier groups by what its cards are. It is dependency-free and
+   side-effect-free; load it as a classic script and use window.AttentionView.
 
    Everything a surface needs to decide *where a card renders* and *what mark it
    carries* lives here, so the surfaces cannot drift apart again. */
@@ -22,6 +22,46 @@
     if (row.section !== 'closed' && row.firstSeenAt && row.firstSeenAt > since) return { kind: 'new' };
     if (row.lastChangedAt && row.lastChangedAt > since) return row.lastChange || { kind: 'moved', label: 'changed' };
     return null;
+  }
+
+  /** What a Waiting card *is*, so six near-identical ones cost one line: the
+      repository it belongs to, else the Jira project its key names (all a Jira
+      card has to group by), else only "other". */
+  function groupOf(row) {
+    if (row.container) return row.container.split('/').pop();
+    const m = /^([A-Z]+)-/.exec(row.ref || '');
+    return m ? m[1] : 'other';
+  }
+
+  /** What a group is hiding: the title opening most of its rows share, when
+      they share one — first opening in row order wins a tie. */
+  function groupNoteOf(rows) {
+    const openings = new Map();
+    for (const row of rows) {
+      const opening = ((row.title || '').split(/[:(]/)[0] || '').trim().slice(0, 28);
+      openings.set(opening, (openings.get(opening) || 0) + 1);
+    }
+    const top = [...openings.entries()].sort((a, b) => b[1] - a[1])[0];
+    return top[1] > 1 ? top[1] + ' \u00d7 ' + top[0] : 'one off each';
+  }
+
+  /** The Waiting tier as groups: every row says which group it landed in, the
+      rows keep the tier's own order, and groups keep the order their key first
+      appears in. A lone card is a group of one. */
+  function waitingGroups(rows) {
+    const byKey = new Map();
+    const keyed = rows.map(row => {
+      const key = groupOf(row);
+      if (!byKey.has(key)) byKey.set(key, []);
+      const copy = { ...row, groupKey: key };
+      byKey.get(key).push(copy);
+      return copy;
+    });
+    return {
+      rows: keyed,
+      groups: [...byKey.entries()].map(([key, groupRows]) =>
+        ({ key, note: groupNoteOf(groupRows), rows: groupRows })),
+    };
   }
 
   function overlay(data, options) {
@@ -59,12 +99,23 @@
 
     const tiers = (data.tiers || []).map(t => {
       const list = t.items.filter(work).concat(ghosts(t.key));
+      // Waiting is where the noise piles up, so the rules hand it back grouped
+      // rather than let a surface invent the groups. The rows are the same rows
+      // in the same order; the other tiers carry no groups at all.
+      if (t.key === 'waiting') {
+        const g = waitingGroups(list);
+        return { key: t.key, title: t.title, rows: g.rows, groups: g.groups, count: list.length };
+      }
       return { key: t.key, title: t.title, rows: list, count: list.length };
     });
 
+    // Parking is one concept with two kinds — a snooze wakes at a time, an ack
+    // holds until the card moves — so both land in one fold. Snoozed rows come
+    // first, then the acks: the order the two separate folds used to render in.
+    const parkedRows = rows.filter(r => snoozeOf(r))
+      .concat(rows.filter(r => ackOf(r) && !snoozeOf(r)));
     const folds = {
-      snoozed: rows.filter(r => snoozeOf(r)),
-      acked: rows.filter(r => ackOf(r)),
+      parked: parkedRows,
       mail: rows.filter(r => isMail(r) && !parked(r)),
       support: rows.filter(r => isSupport(r) && !parked(r)),
       drafts: (data.drafts || []).filter(work).concat(ghosts('drafts')),
@@ -89,6 +140,8 @@
         oldestClause(folds.drafts)
       ].filter(Boolean).join(' · '),
       support: () => oldestClause(folds.support),
+      // What the one fold hides: two kinds of parking, and how each wakes.
+      parked: () => folds.parked.length ? 'snoozed until a time, or until the card changes' : '',
     };
 
     /** When nothing needs you, name what you could pick up instead: only Ready,

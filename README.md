@@ -86,9 +86,9 @@ archiving does not, and the dashboard never writes to Gmail.
 A thread becomes one card (`mail/<threadId>`). The **star is membership and
 nothing else**; the state follows who sent the last message — `waiting-reply`
 when the From address is the mailbox account, `needs-reply` when it is anyone
-else (or missing). Cards render in a **collapsed Mail fold** rather than the
-tiers — like drafts — so starred mail never inflates the Needs count; expand the
-fold to read them, and its summary says `oldest <age> · <n> unread`. Otherwise:
+else (or missing). Cards render in a **collapsed Starred mail fold** rather
+than the tiers — like drafts — so starred mail never inflates the Needs count;
+expand the fold to read them, and its summary says `oldest <age> · <n> unread`. Otherwise:
 with `unread` / `N messages` / `attachment` as facts, the snippet as detail, and
 a Gmail deep link. A Jira key or GitHub ref in the subject/snippet merges the
 email into that ticket's card; a key that does not resolve is ignored (free text
@@ -128,9 +128,9 @@ styling up on hover:
   back on the board the moment `lastChangedAt` passes your ack. This is the one
   for recurring noise you already know about.
 
-Parked cards leave the tiers (and the Mail fold) and collect in collapsed
-**Snoozed** / **Acknowledged** folds, each with `wake` / `unack`. The header line
-still counts them, so a parked card never disappears silently.
+Parked cards leave the tiers (and the Mail fold) and collect in one collapsed
+**Parked** fold, both kinds together and each row with its own `wake` / `unack`.
+The header line still counts them, so a parked card never disappears silently.
 
 Both are user intent, not data, so they live beside the snapshot in
 `snoozes.json` (`{key: wake-up ISO}`) and `acks.json` (`{key: acked-at ISO}`) and
@@ -167,11 +167,11 @@ one of the references above.
 
 `attention-view.js` is the only place the *reader-side* rules live — change
 flags, ghosts (hidden in Needs, never for mail or support), the With
-support/Mail/Snoozed/Acknowledged folds, the fold summaries (oldest age, unread
-mail, conflicted drafts — built from the ages already on the rows, never a
-second calculation), the next-card line an empty Needs tier shows (the first
-Ready card, or nothing when Ready is empty too), and where a card renders. The
-dashboard loads it (the server serves it at `/attention-view.js`), so the
+support/Starred mail/Parked folds, the fold summaries (oldest age, unread mail,
+conflicted drafts, the parked kinds — built from the ages already on the rows,
+never a second calculation), the next-card line an empty Needs tier shows (the
+first Ready card, or nothing when Ready is empty too), and where a card renders.
+The dashboard loads it (the server serves it at `/attention-view.js`), so the
 surfaces cannot drift apart.
 `node test_attention_view.mjs` checks it.
 
@@ -218,10 +218,34 @@ contains enough history for the reader to see what it missed.
 
 ## Surface
 
-**Dashboard** (`dashboard.html`, served at `/` by `attention.py`) — the tiers,
-collapsed With support/Mail/Snoozed/Acknowledged/Drafts/Recently closed folds,
-the `new` / `changed` / `dropped` marks, and the last-look timestamp
-(`gha.seenAt`). Every read comes from the producer at `/api/queue`.
+**Dashboard** (`dashboard.html`, served at `/` by `attention.py`) — the
+**Briefing**: a document that reads top to bottom. Every read comes from the
+producer at `/api/queue`, and every decision about *where* a card renders comes
+from `attention-view.js`.
+
+- It opens with the day and the rules' summary sentence — what is new, changed
+  and dropped since your last look (`gha.seenAt`) — with the snapshot age and
+  the producer stamp underneath.
+- **Needs you now** renders as generous blocks: title, states, facts, labels and
+  the Jira line, then age, links and parking.
+- **Ready when you are** and **Waiting on others** render as one-line rows.
+  Waiting renders the groups the rules hand back: a group of several rows
+  collapses behind `key · N items — note`, and a group of one is a plain row.
+- **Starred mail**, **With support**, **Parked**, **Drafts** and **Recently
+  closed** are collapsed folds, each showing its count and the description the
+  rules give it (`oldest 3d · 2 unread`, `snoozed until a time, or until the
+  card changes`, …). A fold the rules have nothing to say about shows its count
+  only.
+- A card with linked items carries `N linked` at the row's right, beside age and
+  parking, expanding them in place; a card with no links carries no count. Each
+  child keeps its own chip, ref, states, facts, labels, detail and age — one
+  card renderer serves every place a card appears, so no layout drops a part.
+- A card that has left the queue renders as struck history — no state pills and
+  no facts, just what it was and when it went — in the section it left.
+- An empty **Needs you now** names the next card that could be picked up (the
+  rules' next-card line) instead of reading as an empty queue.
+- Parking is an explicit control on every card and writes the same `snoozes.json`
+  / `acks.json` files as ever; a parked card still counts in the header line.
 
 ```bash
 # write the snapshot yourself instead of pressing refresh
