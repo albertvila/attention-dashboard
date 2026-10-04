@@ -4,8 +4,9 @@
 
    Covers what used to be copied per surface: change flags, the closed/new rule,
    ghosts (hidden in Needs, never for mail or support), the With support and Mail
-   folds, snooze parking, an ack that only holds while the card has not moved,
-   the fold summaries, and the next-card line. */
+   folds, the one Parked fold both kinds of parking land in, an ack that only
+   holds while the card has not moved, the Waiting tier's groups, the fold
+   summaries, and the next-card line. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -83,29 +84,67 @@ view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [mail] }, { key
                               { key: 'waiting', title: 'w', items: [row()] }] }), { now: NOW });
 assert.deepEqual(view.tiers[0].rows, []);                        // mail never sits in a tier
 assert.deepEqual(view.folds.mail.map(r => r.key), ['mail/1']);
-assert.deepEqual(view.folds.snoozed, []);
+assert.deepEqual(view.folds.parked, []);
+assert.equal('snoozed' in view.folds || 'acked' in view.folds, false);   // one fold, not two
 
 view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [mail] }, { key: 'ready', title: 'r', items: [] },
                               { key: 'waiting', title: 'w', items: [row()] }] }),
                { snoozes: { 'mail/1': '2026-10-03T12:00:00.000Z', 'FIRE-1': '2026-10-03T12:00:00.000Z' }, now: NOW });
-assert.deepEqual(view.folds.snoozed.map(r => r.key).sort(), ['FIRE-1', 'mail/1']);
+assert.deepEqual(view.folds.parked.map(r => r.key).sort(), ['FIRE-1', 'mail/1']);
 assert.deepEqual(view.folds.mail, []);                            // parking beats the mail fold
 assert.equal(view.tiers[2].count, 0);
 assert.equal(view.formatWhen('2026-10-03T12:00:00.000Z').startsWith('until '), true);
 // an expired snooze is not a snooze
-assert.equal(overlay(data(), { snoozes: { 'FIRE-1': '2026-10-01T00:00:00.000Z' }, now: NOW }).folds.snoozed.length, 0);
+const expired = overlay(data(), { snoozes: { 'FIRE-1': '2026-10-01T00:00:00.000Z' }, now: NOW });
+assert.equal(expired.folds.parked.length, 0);
+assert.equal(expired.snoozeOf(expired.tiers[2].rows[0]), null);   // and it is not parked at all
+assert.equal(expired.parked(expired.tiers[2].rows[0]), false);
 
 // --- ack: holds until the card moves ---------------------------------------
 const acks = { 'FIRE-1': '2026-10-02T11:30:00.000Z' };
 view = overlay(data(), { acks, now: NOW });
-assert.deepEqual(view.folds.acked.map(r => r.key), ['FIRE-1']);    // unchanged since the ack
+assert.deepEqual(view.folds.parked.map(r => r.key), ['FIRE-1']);    // unchanged since the ack
 assert.equal(view.tiers[2].count, 0);
 view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
                                { key: 'waiting', title: 'w', items: [row({ lastChangedAt: '2026-10-02T11:45:00.000Z' })] }] }),
                { acks, now: NOW });
-assert.deepEqual(view.folds.acked, []);                            // it moved: back on the board
+assert.deepEqual(view.folds.parked, []);                           // it moved: back on the board
 assert.equal(view.tiers[2].count, 1);
 assert.equal(view.flag(view.tiers[2].rows[0]).kind, 'moved');
+
+// --- one Parked fold for both kinds ----------------------------------------
+// A snooze parks until a time, an ack parks until the card moves: same fold,
+// no tier, and the row still says which kind it is under.
+const parkedData = (items) => data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                             { key: 'ready', title: 'r', items: [] },
+                                             { key: 'waiting', title: 'w', items }] });
+view = overlay(parkedData([row({ key: 'S1' }), row({ key: 'A1' })]),
+               { snoozes: { S1: '2026-10-03T12:00:00.000Z' }, acks: { A1: '2026-10-02T11:30:00.000Z' }, now: NOW });
+assert.deepEqual(view.tiers[2].rows, []);                          // parked renders in no tier
+assert.equal(view.tiers[2].count, 0);
+assert.deepEqual(view.folds.parked.map(r => r.key), ['S1', 'A1']); // snoozed first, then acked
+const parkedBy = Object.fromEntries(view.folds.parked.map(r => [r.key, r]));
+assert.equal(view.snoozeOf(parkedBy.S1), '2026-10-03T12:00:00.000Z');  // a snooze still says when it wakes
+assert.equal(view.ackOf(parkedBy.S1), null);
+assert.equal(view.ackOf(parkedBy.A1), '2026-10-02T11:30:00.000Z');     // an ack still says which kind
+assert.equal(view.snoozeOf(parkedBy.A1), null);
+assert.equal(view.parked(parkedBy.S1), true);
+assert.equal(view.parked(parkedBy.A1), true);
+assert.equal(view.notes.parked(), 'snoozed until a time, or until the card changes');
+// both files name the same card: it shows once, and the snooze is what it reports
+view = overlay(parkedData([row({ key: 'B1' })]),
+               { snoozes: { B1: '2026-10-03T12:00:00.000Z' }, acks: { B1: '2026-10-02T11:30:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.parked.map(r => r.key), ['B1']);
+assert.equal(view.snoozeOf(view.folds.parked[0]), '2026-10-03T12:00:00.000Z');
+// parking is not a hide: a new or moved parked card still counts in the header line
+view = overlay(parkedData([row({ key: 'N1', firstSeenAt: '2026-10-02T11:30:00.000Z' }),
+                           row({ key: 'M1', firstSeenAt: '2026-09-01T00:00:00.000Z',
+                                 lastChangedAt: '2026-10-02T11:30:00.000Z',
+                                 lastChange: { kind: 'moved', label: 'a → b' } })]),
+               { snoozes: { N1: '2099-01-01T00:00:00.000Z' }, acks: { M1: '2026-10-02T11:30:00.000Z' }, now: NOW });
+assert.deepEqual(view.folds.parked.map(r => r.key).sort(), ['M1', 'N1']);
+assert.equal(view.counts().new, 1);
+assert.equal(view.counts().changed, 1);
 
 // --- With support: a Jira card in Support Investigating ---------------------
 const SUPPORT = { key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' };
@@ -133,14 +172,14 @@ assert.deepEqual(view.folds.support, []);
 
 // parking beats the support fold, and coming back lands in the fold, not the queue
 view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-03T12:00:00.000Z' }, now: NOW });
-assert.deepEqual(view.folds.snoozed.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.folds.parked.map(r => r.key), ['SUP-1']);
 assert.deepEqual(view.folds.support, []);
 assert.equal(view.tiers[2].count, 0);
 view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-01T00:00:00.000Z' }, now: NOW });
 assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // expired: back in the fold
 assert.deepEqual(view.tiers[2].rows, []);
 view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-10-02T11:00:00.000Z' }, now: NOW });
-assert.deepEqual(view.folds.acked.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.folds.parked.map(r => r.key), ['SUP-1']);
 assert.deepEqual(view.folds.support, []);
 view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-09-30T00:00:00.000Z' }, now: NOW });
 assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // released: still not the queue
@@ -159,6 +198,74 @@ assert.equal(view.counts().changed, 1);
 // an ordinary in-progress row stays exactly where it was
 assert.deepEqual(overlay(supData([row()]), { now: NOW }).tiers[2].rows.map(r => r.key), ['FIRE-1']);
 
+// --- waiting groups: what the cards are -------------------------------------
+// Six near-identical job warnings are six identical rows, so the rules hand the
+// Waiting tier back grouped — by repository, else by Jira project. The tier's
+// rows and their order do not change; the groups only say how they are read.
+const wData = (items) => data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                       { key: 'ready', title: 'r', items: [] },
+                                       { key: 'waiting', title: 'w', items }] });
+const groupRows = (v) => v.tiers[2].groups.flatMap(g => g.rows);
+
+// the key is the repository the card belongs to...
+view = overlay(wData([row({ key: 'R1', ref: 'albertvila/attention-dashboard#14',
+                            container: 'albertvila/attention-dashboard' })]), { now: NOW });
+assert.equal(view.tiers[2].groups[0].key, 'attention-dashboard');
+assert.equal(view.tiers[2].rows[0].groupKey, 'attention-dashboard');   // the row says where it landed
+// ...else the Jira project its key names, which is all a Jira card has...
+view = overlay(wData([row({ key: 'F1', ref: 'FIRE-83399' })]), { now: NOW });
+assert.equal(view.tiers[2].groups[0].key, 'FIRE');
+assert.equal(view.tiers[2].rows[0].groupKey, 'FIRE');
+// ...else the card is only "other"
+view = overlay(wData([row({ key: 'O1', ref: '', container: '' })]), { now: NOW });
+assert.equal(view.tiers[2].groups[0].key, 'other');
+assert.deepEqual(view.tiers[2].groups[0].rows.map(r => r.key), ['O1']);
+
+// a group names the opening its rows share; a card alone in its group says so
+const job = (over = {}) => row({ container: 'acme/web-frontend',
+  title: '[DATABRICKS] Job Failed : one', ...over });
+const twins = wData([job({ key: 'D1', ref: 'web-frontend#1', title: '[DATABRICKS] Job Failed : one' }),
+                     job({ key: 'D2', ref: 'web-frontend#2', title: '[DATABRICKS] Job Failed : two' }),
+                     job({ key: 'D3', ref: 'web-frontend#3', title: '[DATABRICKS] Job Failed : three' }),
+                     row({ key: 'F1', ref: 'FIRE-83399', title: 'a lone Jira card' })]);
+view = overlay(twins, { now: NOW });
+assert.deepEqual(view.tiers[2].groups.map(g => [g.key, g.rows.length, g.note]),
+  [['web-frontend', 3, '3 × [DATABRICKS] Job Failed'],    // the opening they share, counted
+   ['FIRE', 1, 'one off each']]);                           // a lone card is its own group of one
+// nothing lost, nothing duplicated: the groups are the tier's rows, once each
+assert.deepEqual(groupRows(view).map(r => r.key), view.tiers[2].rows.map(r => r.key));
+assert.equal(new Set(groupRows(view).map(r => r.key)).size, groupRows(view).length);
+// the snapshot itself is not written to: the key rides on the rules' own rows
+assert.equal('groupKey' in twins.tiers[2].items[0], false);
+// groups appear in the order their key first appears — not by size — while a
+// tier that interleaves them keeps its own row order
+view = overlay(wData([row({ key: 'F1', ref: 'FIRE-83399', title: 'a lone Jira card' }),
+                      job({ key: 'D1', ref: 'web-frontend#1', title: '[DATABRICKS] Job Failed : one' }),
+                      job({ key: 'D2', ref: 'web-frontend#2', title: '[DATABRICKS] Job Failed : two' })]),
+               { now: NOW });
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['F1', 'D1', 'D2']);
+assert.deepEqual(view.tiers[2].groups.map(g => g.key), ['FIRE', 'web-frontend']);
+assert.deepEqual(view.tiers[2].groups.map(g => g.rows.map(r => r.key)), [['F1'], ['D1', 'D2']]);
+assert.deepEqual(groupRows(view).map(r => r.key), ['F1', 'D1', 'D2']);
+// a key's rows merge wherever they sit in the tier, not only where they are
+// adjacent: two web-frontend rows with a FIRE row between them are one group
+const scattered = wData([job({ key: 'D1', ref: 'web-frontend#1', title: '[DATABRICKS] Job Failed : one' }),
+                         row({ key: 'F1', ref: 'FIRE-83399', title: 'a lone Jira card' }),
+                         job({ key: 'D2', ref: 'web-frontend#2', title: '[DATABRICKS] Job Failed : two' })]);
+view = overlay(scattered, { now: NOW });
+assert.equal(view.tiers[2].groups.length, 2);                          // run-length reading would say three
+assert.deepEqual(view.tiers[2].groups.map(g => g.key), ['web-frontend', 'FIRE']);
+assert.deepEqual(view.tiers[2].groups.map(g => g.rows.map(r => r.key)), [['D1', 'D2'], ['F1']]);
+assert.equal(view.tiers[2].groups[0].note, '2 × [DATABRICKS] Job Failed');   // counted across the merge
+// interleaved, so the partition is asserted by key, not by position
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['D1', 'F1', 'D2']);    // the tier's own order
+const flat = groupRows(view).map(r => r.key);
+assert.deepEqual(flat.slice().sort(), view.tiers[2].rows.map(r => r.key).slice().sort());
+assert.equal(new Set(flat).size, flat.length);                         // once each, none lost
+// only Waiting groups: the other tiers are plain lists
+assert.equal('groups' in view.tiers[0], false);
+assert.equal('groups' in view.tiers[1], false);
+
 // --- fold summaries: what a collapsed fold is hiding ------------------------
 const mailRow = (over = {}) => row({ chip: 'MAIL', key: 'mail/' + (over.id || '1'), ref: '',
   states: [{ key: 'needs-reply', label: 'needs reply', tier: 'needs', tone: 'warn' }], ...over });
@@ -169,6 +276,7 @@ view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [
 assert.equal(view.notes.mail(), 'oldest 5d · 1 unread');            // the oldest row's own age
 assert.equal(view.notes.drafts(), '');                             // nothing hidden, nothing to say
 assert.equal(view.notes.support(), '');
+assert.equal(view.notes.parked(), '');                             // nothing parked, nothing to say
 // unread shows even at zero, and no updated time means no oldest clause
 view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [mailRow({ id: '1' })] },
                               { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }), { now: NOW });
