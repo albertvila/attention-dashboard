@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow &amp; skills — reference</title>
+<!--
+  The reference page — my workflow and my skills on one page, served at
+  /reference beside the Briefing.
+
+  Static: it renders no snapshot, reads no parking file, and holds no producer
+  state. The queue's rules do not reach it and it is not queue data — it is a
+  hand-maintained page, edited here. Nothing is persisted.
+
+  Provenance, all in the dotfiles repo under docs/:
+    dev-workflow.excalidraw, diagram.excalidraw, matt-pocock-flow.excalidraw
+      the six-step loop, the two run shapes, the single-thread flow
+    skills-cheatsheet.html
+      the skills table, lifted verbatim
+  That repo also keeps the prototype this layout was chosen from, in
+  .scratch/prototype-diagrams/.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --panel2:#1c2029; --border:#262b36;
+    --text:#d7dce3; --dim:#8b93a1; --accent:#6cb6ff; --mono:#9ece6a;
+    --warn:#e0af68;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif;padding-bottom:40px}
+  code{font-family:ui-monospace,Menlo,monospace;color:var(--mono)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  header.banner{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--border);padding:14px 24px 10px}
+  .brow{max-width:1180px;margin:0 auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  h1{font-size:19px;font-weight:650;white-space:nowrap}
+  h1 span{color:var(--dim);font-weight:400;font-size:14px}
+  #q{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 13px;font-size:14px;outline:none}
+  #q:focus{border-color:var(--accent)}
+  .srcrow{max-width:1180px;margin:10px auto 0;display:flex;flex-wrap:wrap;gap:7px}
+  .chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:3px 11px;font-size:12px;color:var(--dim)}
+  .chip:hover{border-color:#3a4151;color:var(--text)}
+  .chip.active{border-color:currentColor;color:var(--text)}
+  .chip .dot{width:8px;height:8px;border-radius:50%}
+  .chip b{color:var(--text);font-weight:600}
+
+  main{max-width:1180px;margin:0 auto;padding:10px 24px 40px}
+  h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:30px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+  h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 8px}
+  .muted{color:var(--dim)}
+  .hidden{display:none !important}
+  .dimmed{opacity:.32}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 13px}
+  .card:hover{border-color:#3a4151}
+  .card.sel{border-color:var(--accent);background:var(--panel2)}
+  .card .desc2{display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:13px;color:var(--text)}
+  .card.sel .desc2{display:block}
+  .card .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .name{font-family:ui-monospace,Menlo,monospace;font-size:13.5px;color:var(--mono);font-weight:600}
+  .badge{flex-shrink:0;font-size:10px;font-weight:700;border-radius:999px;padding:2px 8px;border:1px solid}
+  .desc{color:var(--dim);font-size:13px;margin-top:4px}
+  .usage{font-size:12px;color:var(--dim);margin-top:6px}
+  .usage b{color:var(--text)}
+  .pill{display:inline-block;font-size:10.5px;font-weight:650;border-radius:999px;padding:2px 8px;background:#6cb6ff18;color:var(--accent);border:1px solid #6cb6ff33}
+  button.pill{font-family:inherit;cursor:pointer;line-height:1.5}
+  button.pill:hover{border-color:var(--accent)}
+  .pill.warn{background:#e0af6818;color:var(--warn);border-color:#e0af6833}
+  .pill.mono{font-family:ui-monospace,Menlo,monospace;background:#9ece6a14;color:var(--mono);border-color:#9ece6a33}
+
+  ul.tight{margin:6px 0 0 18px;font-size:13px;color:var(--dim)}
+  ul.tight li{margin:3px 0}
+  ul.tight b{color:var(--text);font-weight:600}
+
+
+  /* ---- the board ---- */
+
+  .flowbox{border:1px solid var(--border);border-radius:12px;padding:13px 14px;background:var(--panel)}
+  .flowbox h4{font-size:14px;font-weight:600}
+  .flowbox .tag{margin-left:8px}
+  .flow{margin-top:10px;font-size:12.5px;color:var(--dim);line-height:1.9}
+  .node{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;margin:0 2px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--text)}
+  .node.rev{border-color:#d16d9e55;color:#d16d9e}
+  .node.pony{border-color:#e0af6855;color:var(--warn)}
+  .sep{color:#3a4151;margin:0 3px}
+  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+
+  #skills{scroll-margin-top:132px}
+
+  footer{max-width:1180px;margin:30px auto 0;color:var(--dim);font-size:12.5px;border-top:1px solid var(--border);padding-top:14px}
+</style>
+</head>
+<body>
+<header class="banner">
+  <div class="brow">
+    <h1>Workflow &amp; skills <span>reference</span></h1>
+    <input id="q" type="search" placeholder="Filter skills — name, trigger, keyword, or source…" autofocus>
+  </div>
+  <div class="srcrow" id="legend"></div>
+</header>
+<main id="app"></main>
+<footer id="foot"></footer>
+
+<script>
+/* ================================================================= DATA == */
+/* Skills data is lifted verbatim from docs/skills-cheatsheet.html so the two
+   stay comparable while the layout question is open. */
+const SOURCES = {
+  mp:          { label: 'Matt Pocock',              color: '#6cb6ff' },
+  bb:          { label: 'bb-orchestration-skills',  color: '#ff9e64' },
+  bbtool:      { label: 'BB builtin',               color: '#4fd6be' },
+  lmai:        { label: 'LM-AI repo',               color: '#d16d9e' },
+  custom:      { label: 'Custom / yours',           color: '#9ece6a' },
+  ponytail:    { label: 'npm: ponytail',            color: '#e0af68' },
+  plannotator: { label: 'npm: plannotator',         color: '#bb9af7' },
+  mcp:         { label: 'npm: pi-mcp-adapter',      color: '#f7768e' },
+  skillssh:    { label: 'skills.sh',                color: '#7dcfff' },
+  orch:        { label: 'orchestration (Alas/BB/Herdr/Orca)', color: '#a4b1ff' },
+  twg:         { label: 'TWG (Atlassian)',          color: '#ff7eb6' },
+};
+
+const SECTIONS = [
+["Plan & ship work", [
+  ["wayfinder", "Plan work too big for one session as a map of decision tickets; resolve them one at a time.", "mp"],
+  ["to-spec", "Turn the current conversation into a spec on the issue tracker. No interview, just synthesis.", "mp"],
+  ["to-tickets", "Break a plan/spec into tracer-bullet tickets with declared blocking edges.", "mp"],
+  ["to-questionnaire", "Turn a decision you can't answer into a questionnaire for someone else to fill in.", "mp"],
+  ["triage", "Move issues and external PRs through triage states; write agent-ready briefs.", "mp"],
+  ["implement", "Implement a piece of work from a spec or set of tickets.", "mp"],
+  ["implement-spec", "Implement a specification in code.", "mp"],
+]],
+["Review & merge", [
+  ["code-review", "Review changes since a commit/branch/merge-base against Standards + Spec, in parallel. \"review since X\".", "mp"],
+]],
+["Debug & incidents", [
+  ["diagnosing-bugs", "Diagnosis loop for hard bugs and perf regressions. \"diagnose this\", \"it's broken/slow\".", "mp"],
+  ["lm-debug", "/lm-debug — hypothesis-driven debugging with log injection (Cursor debug-mode style).", "lmai"],
+  ["lm-fireline", "Investigate a prod incident from a FIRE ticket / Slack alert / Databricks run URL; post root cause to Jira.", "lmai"],
+  ["den-triage", "Triage failed DEN Databricks prod jobs end to end: discover, investigate, report into bb tasks.", "custom"],
+  ["lm-doc-trace", "Why is this post/article missing or wrong (brand, reach, MIV…)? Plain-language trace through the LM data pipeline.", "custom"],
+]],
+["Think & decide", [
+  ["grilling", "Grill me relentlessly about a plan, decision, or idea. Any \"grill\" trigger phrase.", "mp"],
+  ["grill-me", "Relentless interview to sharpen a plan or design.", "mp"],
+  ["grill-with-docs", "Same interview, but also produces ADRs and a glossary as you go.", "mp"],
+  ["ask-matt", "Which skill or flow fits my situation? Open the router over all skills.", "mp"],
+  ["wait-what", "\"Stop. That last message did not land — re-pitch it.\"", "mp"],
+  ["prototype", "Throwaway prototype to answer a design question or explore what a UI should look like.", "mp"],
+  ["loop-me", "Grill me about specs for the workflows I want to build in this workspace.", "mp"],
+  ["teach", "Teach me a new skill or concept, within this workspace.", "mp"],
+]],
+["Write & share", [
+  ["writing-fragments", "Writing, explore: mine raw fragments, no structure yet.", "mp"],
+  ["writing-beats", "Writing, exploit: assemble raw material into a journey of beats.", "mp"],
+  ["writing-shape", "Writing, exploit: shape raw material into an article, paragraph by paragraph.", "mp"],
+  ["writing-for-agents", "Creating or editing skills, AGENTS.md, or CLAUDE.md.", "mp"],
+  ["research", "Research a topic against high-trust primary sources → Markdown file in the repo.", "mp"],
+  ["lm-pretty-plan", "/lm-pretty-plan — render a plan as a styled, navigable HTML doc with sidebar.", "lmai"],
+  ["lm-share-md", "/lm-share-md — share an .md file as a rendered secret GitHub Gist with a stable link.", "lmai"],
+  ["handoff", "Compact the current conversation into a handoff document for another agent.", "mp"],
+  ["claude-handoff", "Hand the conversation to a fresh background agent that picks up the work immediately.", "mp"],
+  ["retro", "Conduct a retrospective on a coding session.", "mp"],
+]],
+["Codebase & architecture", [
+  ["codebase-design", "Deep-module vocabulary: interfaces, seams, testability, AI-navigability.", "mp"],
+  ["improve-codebase-architecture", "Scan for deepening opportunities → visual HTML report → grill through your pick.", "mp"],
+  ["improve-architecture-auto", "Fully automatic architecture improvement, hot-spot scan to scored tickets, zero questions.", "custom"],
+  ["tdd", "Test-first features and bug fixes; red-green-refactor, integration tests.", "mp"],
+  ["migrate-to-shoehorn", "Replace `as` type assertions in tests with @total-typescript/shoehorn.", "mp"],
+  ["resolving-merge-conflicts", "Resolve an in-progress git merge/rebase conflict.", "mp"],
+  ["domain-modeling", "Codebase terminology, CONTEXT.md, recording/editing ADRs.", "mp"],
+]],
+["Setup & tooling", [
+  ["setup-pre-commit", "Husky pre-commit hooks: lint-staged (Prettier), typecheck, tests.", "mp"],
+  ["setup-ts-deep-modules", "Wire dependency-cruiser into a TS repo to enforce deep modules.", "mp"],
+  ["setup-matt-pocock-skills", "One-time repo setup for the engineering skills: issue tracker, triage labels, domain docs.", "mp"],
+  ["git-guardrails-claude-code", "Claude Code hooks that block dangerous git commands (push, reset --hard, clean…).", "mp"],
+  ["find-skills", "Discover and install skills. \"how do I do X\", \"is there a skill that can…\"", "skillssh"],
+  ["wizard", "Interactive bash wizard for human-only steps: credentials, CI secrets, dashboards, cutovers.", "mp"],
+  ["scaffold-exercises", "Scaffold course exercise directories: sections, problems, solutions, explainers.", "mp"],
+]],
+["Launchmetrics", [
+  ["lm-cli", "The `lm` CLI — mandatory LM dev utility: git workflow, project setup, testing, daily tasks.", "lmai"],
+  ["lm-pyconv", "LM Python conventions package: Black, isort, Flake8 + plugins, CLI, IDE integration.", "lmai"],
+  ["lm-summarize-jira-ticket", "/lm-summarize-jira-ticket — dev-focused TL;DR of a Jira ticket: what to build, why, ACs, open questions.", "lmai"],
+]],
+["Personal", [
+  ["unani-metricas", "\"procesa las métricas\" — calcula macros de los días (parcial) del registro Unani y añade las tablas al markdown.", "custom"],
+  ["reading-digest", "\"run the reading digest\" — triage the links saved in Things: worth-your-time verdicts, repo health, and a UUID delete queue for the graveyard.", "custom"],
+]],
+["Ponytail (minimal-code mode)", [
+  ["ponytail", "Laziest solution that works: stdlib first, shortest diff. \"ponytail\", \"be lazy\", \"yagni\".", "ponytail"],
+  ["ponytail-review", "/ponytail-review — review a diff exclusively for over-engineering; what to delete.", "ponytail"],
+  ["ponytail-audit", "/ponytail-audit — whole-repo over-engineering audit, ranked cut list.", "ponytail"],
+  ["ponytail-debt", "/ponytail-debt — harvest every `ponytail:` comment into a debt ledger.", "ponytail"],
+  ["ponytail-gain", "/ponytail-gain — measured impact scoreboard.", "ponytail"],
+  ["ponytail-help", "/ponytail-help — quick-reference card for all ponytail modes and commands.", "ponytail"],
+]],
+["Internals & meta", [
+  ["bb-cli", "Inspect or manage BB state with the bb CLI.", "bbtool"],
+  ["mcp-scripting", "Write mcpScript JavaScript for discovering, inspecting, and calling MCP tools.", "mcp"],
+  ["plannotator", "Plannotator CLI: annotate plans, code, files, URLs; browse decisions; share Guided Reviews.", "plannotator"],
+]],
+["Only visible in BB (not installed as pi skills)", [
+  ["bb-plugin-authoring", "Write, build, test, and install BB plugins: CLI commands, agent tools, providers, panels, renderers…", "bbtool"],
+  ["skill-creator", "Create or improve bb skills; turn a workflow into a reusable skill; fix skill triggering.", "bbtool"],
+  ["submit-a-plugin", "Submit a bb plugin to the BB Community marketplace: validates, builds entry + screenshots, opens the PR.", "bbtool"],
+  ["automations", "Schedule recurring or one-shot agent/script work with bb automation commands.", "bbtool"],
+  ["share-server-links", "Hand the user a link to a local dev server over bb connect — better than pasting localhost URLs.", "bbtool"],
+  ["docs", "Read, create, and update notes, plans, and HTML artifacts in the user's Docs vaults.", "bbtool"],
+  ["inline-vis", "Render a workspace .html file as a sandboxed inline visualization right in the chat thread.", "bbtool"],
+  ["memory", "Durable BB memory: recall prior project knowledge and cross-project preferences; save new learnings.", "bbtool"],
+  ["secrets", "Request credentials from the user and write them to a dotenv file without exposing values to the agent.", "bbtool"],
+  ["tasks", "Work on Tasks-plugin tasks: task keys (ABC-12), comments, attachments, delegation, status updates.", "bbtool"],
+  ["bb-theme-authoring", "Create or edit a bb theme (app colour palette) and verify it live in the Theme Preview panel.", "bbtool"],
+  ["workflows", "Run deterministic multi-agent workflow scripts: parallel/sequential pipelines, structured outputs.", "bbtool"],
+]],
+["Under evaluation", [
+  // --- orchestrated runs: plan -> threads -> retro, one per harness ---
+  ["orchestrate-bb-plan", "Plan a BB run, approve once, spawn and babysit the manager thread.", "orch", "`/orchestrate-bb-plan <BB-TASK>` or `@.scratch/<feature>/`"],
+  ["orchestrate-bb-threads", "Execute the BB plan as the manager thread: workers, ledger, reviews, land.", "orch", "`/orchestrate-bb-threads` with the manifest in the prompt"],
+  ["orchestrate-bb-retro", "Retro a finished BB run: phase timings, cost per model, skill edits.", "orch", "“retro the run” / `/orchestrate-bb-retro`"],
+  ["orchestrate-herdr-plan", "Plan a Herdr run and run it as coordinator of this pane.", "orch", "`/orchestrate-herdr-plan @.scratch/<feature>/` or `#42`"],
+  ["orchestrate-herdr-threads", "Execute a Herdr plan: one pi agent per tab, ledger, reviews, land.", "orch", "`/orchestrate-herdr-threads` (this pane carries a manifest)"],
+  ["orchestrate-herdr-retro", "Retro a finished Herdr run: per-phase time, tokens, what to fix.", "orch", "“retro the run” / `/orchestrate-herdr-retro`"],
+  // --- terminals, handoff, PRs ---
+  ["herdr", "Drive the Herdr multiplexer: workspaces, tabs, panes, commands, other agents' terminals.", "orch", "mention Herdr while `HERDR_ENV=1` — “new tab running the tests”"],
+  ["pr", "Write the PR body from the repo's template.", "orch", "automatic when a PR body is written"],
+  // --- TWG: Atlassian / company context ---
+  ["twg", "Root router for company context: Jira, Confluence, PRs, owners, rollups, incidents, deep research.", "twg", "ask any Atlassian/company question — it picks the twg-* sub-skill"],
+  ["twg-jira", "Jira workitems, duplicate detection, projects, boards, sprints, fields, transitions, links.", "twg", "“find duplicate tickets for FIRE-123”, “move ABC-7 to Done”"],
+  ["twg-confluence", "Confluence content, spaces, hierarchy, authoring, comments, versions, permissions, CQL.", "twg", "“update the PRD page”, “what changed in space ENG this week?”"],
+  ["twg-jira-resolve-merged-work", "Dry-run stale Jira items against merged PRs and assignee activity, then clean up.", "twg", "“resolve merged work in sprint 42”"],
+  ["twg-code-review", "Review a Bitbucket/GitHub PR with TWG context; JSON + Markdown, posts only when asked.", "twg", "“TWG-review PR 812”"],
+  ["twg-engineering-work", "Code search, repos using an API, implementation + reverse deps, PR status, hot areas.", "twg", "“which repos call this endpoint?”"],
+  ["twg-context-discovery", "Deep context, dependency maps, project→repo discovery, OOO catch-ups.", "twg", "“catch me up on <project>”"],
+  ["twg-responsibility-routing", "Route owners, SMEs, maintainers, approvers, decision authorities, escalations.", "twg", "“who owns the payments pipeline?”"],
+  ["twg-operational-health", "On-call handoffs, incident investigation, post-incident reviews, reliability reviews, assets.", "twg", "“write the on-call handoff” / “PIR for yesterday's incident”"],
+  ["twg-status-rollups", "Status rollups, personal work summaries, go/no-go briefs (pr-tree, org-tree, work-tree).", "twg", "“roll up my team's status”"],
+  ["twg-space-creation", "Create, design, bootstrap or clone a whole Confluence space from a brief or existing space.", "twg", "“create a Confluence space for <domain>”"],
+  ["twg-agentic-search", "Iterative Rovo search across Confluence, Jira, Drive, Slack, Bitbucket, GitHub.", "twg", "with `twg` for “deep research on X across our docs”"],
+  ["twg-artifacts", "Publish a local or generated file as an Atlassian Artifact.", "twg", "“share this report as an artifact”"],
+  ["twg-bench-lite", "A/B a single prompt: free Atlassian/local MCP context vs TWG graph context.", "twg", "“bench TWG vs plain MCP”"],
+]],
+];
+
+
+/* ---- the loop: idea → merged (docs/dev-workflow.excalidraw) ---- */
+/* ---- the loop: six steps, one learning loop (dev-workflow.excalidraw, live) ---- */
+const WORKFLOW = [
+  { n:1, id:'align', title:'Grill me', cmd:'/grill-with-docs', sub:'interview only — no code',
+    body:'Settle the decisions before anything is built, and store them where this repo keeps docs: CONTEXT.md + ADRs locally, or in the issue.',
+    skills:['grill-with-docs','grilling','domain-modeling'], out:'CONTEXT.md + ADRs' },
+  { n:2, id:'spec', title:'One spec', cmd:'/to-spec', sub:'spec → the issue tracker',
+    body:'Writes the feature spec: a markdown file under .scratch/<feature>/ — or a GitHub issue carrying the spec label.',
+    skills:['to-spec'], out:'a spec, on the tracker' },
+  { n:3, id:'tickets', title:'Spec → tickets', cmd:'/to-tickets', sub:'tracer bullets + blockedBy edges',
+    body:'Tracer-bullet tickets, one vertical slice each: local issue files, or GitHub sub-issues with blockedBy edges. That graph is the order.',
+    skills:['to-tickets','wayfinder'], out:'the ticket graph' },
+  { n:4, id:'plan', title:'Plan', cmd:'/orchestrate-bb-plan', sub:'plan thread · one approval',
+    body:'Reads the spec + tickets, reduces tickets → items (fewer is the default), gives each item a file scope and a wave, renders the plan for one approval. On your yes it records the plan and spawns the manager.',
+    skills:['orchestrate-bb-plan'], out:'an approved plan, and the manager',
+    facts:['the manifest is the approved plan — never re-asked','one approval, then it spawns the manager','a plan without a valid manifest never dispatches'] },
+  { n:5, id:'run', title:'Run', cmd:'/orchestrate-bb-threads', sub:'the orchestrator + its workers',
+    body:'One worker thread per item: waves run in parallel, overlapping file scopes serialize. Every DONE gets a fresh-eyes code review — findings loop back to the same worker, cap 3. Run done → ponytail over all changes → open PR.',
+    skills:['orchestrate-bb-threads','implement','tdd','code-review','ponytail-review'], out:'one shared PR, or one PR per item',
+    facts:['parallel only on disjoint file scopes','review is independent of the worker that wrote it','DONE is a claim until a reviewer passes it'] },
+  { n:6, id:'retro', title:'Retro', cmd:'/orchestrate-bb-retro', sub:'the manager\u2019s sibling thread',
+    body:'Reads the run\u2019s metrics and event log: time per phase, tokens and cost per model, what went wrong. Proposes concrete edits to the orchestration skills.',
+    skills:['orchestrate-bb-retro'], out:'skill edits, one commit',
+    facts:['a number with no explanation is a finding','the record is archived to the corpus','the edits are the point: the next run starts sharper'] },
+];
+const LOOPBACK = { from:'6 · Retro', to:'4 · Plan',
+  text:'the retro\u2019s edits change how the next plan is executed — one commit, and the next run starts cheaper' };
+const GATES = ['the plan approval (4)', 'the PR review on GitHub (5)', 'a yes before any skill edit (6)'];
+
+/* ---- pulled in when the work needs them (live reference block) ---- */
+const SUPPORTING = [
+  { cmd:'/codebase-design', why:'deep modules, clear seams', skill:'codebase-design' },
+  { cmd:'/domain-modeling', why:'vocabulary', skill:'domain-modeling' },
+  { cmd:'/prototype', why:'throwaway answers a design question', skill:'prototype' },
+  { cmd:'/research', why:'facts from primary sources — background agent', skill:'research' },
+  { cmd:'/diagnosing-bugs', why:'the bug loop', skill:'diagnosing-bugs' },
+  { cmd:'/wayfinder', why:'work too big for one session', skill:'wayfinder' },
+  { cmd:'/improve-codebase-architecture', why:'scan for deepening opportunities', skill:'improve-codebase-architecture' },
+];
+
+/* ---- standing rules, straight from dotfiles/AGENTS.md ---- */
+const RULES = [
+  ['Align before code', 'nothing gets built until the decisions are settled.'],
+  ['Smallest diff that works', 'ponytail is in force by default — stdlib, then native, then a line.'],
+  ['Root cause only', 'a fix that leaves a sibling caller broken is not done.'] ,
+  ['Done means demonstrated', 'tests run, behaviour verified — not just code written.'],
+  ['TDD feedback loop', 'red → green → refactor, one slice at a time.'],
+  ['Fresh eyes before commit', 'review the diff against the standards and the spec.'],
+  ['Commit and push only when I say so', 'the agent proposes the message and the file list; I answer.'],
+  ['Broken windows fixed on sight', 'lint errors, failing tests, flakiness — even unrelated ones.'],
+  ['Replacements delete what they replace', 'no compat layers, fallbacks or dead paths left behind.'],
+  ['Spec and tickets from master', '/to-spec + /to-tickets run from the master/main checkout, never in a worktree.'],
+];
+
+/* ---- the two run shapes: pick one per run, at step 5 ---- */
+const FLOWS = [
+  { key:'A', title:'Flow A — single shared PR', tag:'DEFAULT',
+    note:'Workers share the manager\u2019s worktree. Parallel ONLY when items touch disjoint files; overlapping files serialize. Workers never talk to each other.',
+    run:'/orchestrate-bb-threads @.scratch/dead-code-cleanup/issues/',
+    runNote:'Flow A is the default — nothing to state',
+    lane:[['manager','ledger: orchestration.json'],['worker 01','/implement — drives /tdd + its own review · Flash'],['review 01','/code-review — fresh eyes · Sonnet 5','rev'],['ponytail','/ponytail-review — one pass over the combined diff · Flash','pony'],['1 commit → PR','you review on GitHub; manager proposes the message first']],
+    tails:['findings → same worker, cap 3','ponytail findings → a worker that implements only those; re-check, cap 3 (skips code-review)','after you merge: pull main, retire worktree + branch, final report'] },
+  { key:'B', title:'Flow B — PR per item', tag:'state it',
+    note:'Each worker gets its own worktree + branch. All lanes run fully parallel; isolation means no clobbering.',
+    run:'/orchestrate-bb-threads @.scratch/repo-cleanup/issues/ — PR per item',
+    runNote:'say it, or you get Flow A',
+    lane:[['manager','ledger: orchestration.json'],['worker 0n','/implement — own worktree + branch · Flash'],['review 0n','/code-review — fresh eyes · Sonnet 5','rev'],['ponytail 0n','/ponytail-review · Flash','pony'],['open PR 0n','you review on GitHub']],
+    tails:['findings → same worker, cap 3','findings → same or new worker, NO re-review, cap 3','ponytail fix path: worker implements findings → straight back to ponytail','after your reviews: manager merges PRs in dependency order (or you do), resolving cross-PR conflicts, then retires the worktrees'] },
+];
+
+/* ---- the single-thread flow, for work that does not need a run ---- */
+const REFERENCE = {
+  title:'The Matt Pocock flow — idea → open PR',
+  sub:'Seven small composable skills in a line, not one owned process. Align before code, review before the PR. This is the single-thread flow — the same six steps without the orchestration.',
+  href:'https://github.com/mattpocock/skills',
+  setup:'One-time setup per repo: /setup-matt-pocock-skills installs the rest',
+  steps:[['1 · Align','/grill-with-docs — interview only, no code'],['2 · Spec','/to-spec — one spec, one file'],['3 · Tickets','/to-tickets — tracer bullets + blockedBy'],['4 · Build','/implement — one vertical slice, TDD'],['5 · Fresh eyes','/code-review — standards + spec'],['6 · Ship','open PR — you review on GitHub']],
+};
+
+/* ---- automations and standing rules ---- */
+const AUTOMATIONS = [
+  { name:'scratch-sweep', when:'weekly · Mon 09:00 · auto_9zgd3nv-z3i',
+    body:'Scans .scratch/ across every project for pending specs, classifies each as spec-only or tickets-ready, and files one BB task per spec behind a human gate. Deduped by path.',
+    skills:['bb-cli'] },
+];
+
+/* =============================================================== RENDER == */
+const SKILL_INDEX = {};
+for (const [section, skills] of SECTIONS)
+  for (const [name, desc, src, usage] of skills)
+    SKILL_INDEX[name] = { name, desc, src, usage, section };
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const state = { q:'', src:null, sel:null };
+
+function skillCard(name) {
+  const s = SKILL_INDEX[name];
+  if (!s) return `<div class="card" data-name="${esc(name)}" data-src="custom"><div class="top"><div class="name">/${esc(name)}</div><span class="badge" style="color:#8b93a1;border-color:#8b93a155">not in cheatsheet</span></div></div>`;
+  const c = SOURCES[s.src] || { label:s.src, color:'#8b93a1' };
+  return `<div class="card" data-name="${esc(name)}" data-src="${s.src}" data-s="${(name+' '+s.desc+' '+c.label+' '+(s.usage||'')).toLowerCase()}">
+    <div class="top"><div class="name">/${esc(name)}</div>
+    <span class="badge" style="color:${c.color};border-color:${c.color}55;background:${c.color}14">${c.label}</span></div>
+    <div class="desc">${esc(s.desc)}</div>${s.usage ? `<div class="usage"><b>Use:</b> ${esc(s.usage)}</div>` : ''}</div>`;
+}
+// A JS action, not a link: an <a href="#"> is focusable, and Chromium's
+// post-click focus fixup runs after the handler — by which time the click target
+// is gone (the handler re-rendered it), so it focuses <body> and scrolls to 0,
+// silently undoing any scroll the handler asked for.
+function skillPill(name) {
+  return `<button type="button" class="pill mono" data-jump="${esc(name)}">/${esc(name)}</button>`;
+}
+// the one predicate every variant and the state readout agree on
+function matches(name) {
+  const s = SKILL_INDEX[name];
+  if (state.src && (!s || s.src !== state.src)) return false;
+  if (!state.q) return true;
+  const hay = s ? (name + ' ' + s.desc + ' ' + (s.usage || '')).toLowerCase() : name.toLowerCase();
+  return hay.includes(state.q);
+}
+const hits = names => names.filter(matches).length;
+
+function renderSkills() {
+  const html = SECTIONS.map(([title, skills]) => {
+    const cards = skills.filter(([n]) => matches(n)).map(([n]) => skillCard(n)).join('');
+    return cards ? `<section data-sect="${esc(title)}"><h2>${esc(title)}</h2><div class="grid">${cards}</div></section>` : '';
+  }).join('');
+  return { html, shown: matchedCount() };
+}
+const ALL_SKILLS = SECTIONS.flatMap(([, s]) => s.map(([n]) => n));
+const matchedCount = () => ALL_SKILLS.filter(matches).length;
+
+// one flow box for the two run shapes, so they cannot drift apart
+function flowBox(f) {
+  const chain = f.lane.map(([t, , k], i) => `${i ? '<span class="sep">→</span>' : ''}<span class="node ${k || ''}">${esc(t)}</span>`).join('');
+  return `<div class="flowbox"><h4>${esc(f.title)}<span class="tag pill ${f.key === 'A' ? '' : 'warn'}">${esc(f.tag)}</span></h4>
+    <p class="desc">${esc(f.note)}</p>
+    <div class="flow">${chain}</div>
+    <ul class="tight">${f.lane.filter(([, sub]) => sub).map(([t, sub]) => `<li><b>${esc(t)}</b> — ${esc(sub)}</li>`).join('')}</ul>
+    <div class="usage" style="margin-top:8px"><code>${esc(f.run)}</code></div>
+    <ul class="tight">${f.tails.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+}
+
+// the supporting-skills cards, shared by the loop board's helper set
+function supportingBlock() {
+  return `<div class="grid">${SUPPORTING.map(s => `<div class="card"><div class="top"><div class="name">${esc(s.cmd)}</div>${skillPill(s.skill)}</div><div class="desc">${esc(s.why)}</div></div>`).join('')}</div>`;
+}
+
+function board() {
+  const ref = renderSkills();
+  return `<h2>The loop</h2>
+    <div class="rules">${WORKFLOW.map(s => {
+      const dead = (state.q || state.src) && hits(s.skills) === 0;
+      return `<div class="card ${dead ? 'dimmed' : ''} ${state.sel === s.id ? 'sel' : ''}" data-step="${s.id}" style="cursor:pointer">
+        <div class="top"><span class="pill">${s.n}</span><span class="name">${esc(s.cmd)}</span></div>
+        <div class="desc" style="color:var(--text)">${esc(s.title)} — ${esc(s.sub)}</div>
+        <div class="usage">${s.skills.map(skillPill).join(' ')}</div>
+        <div class="desc2">${esc(s.body)}<br><span class="muted">produces:</span> ${esc(s.out)}</div></div>`;
+    }).join('')}</div>
+    <div class="loopback">↩ ${esc(LOOPBACK.from)} → ${esc(LOOPBACK.to)} · ${esc(LOOPBACK.text)}</div>
+    <div class="loopback">Your gates: ${GATES.map(esc).join(' · ')}</div>
+    <h2>Pulled in when the work needs them</h2>
+    ${supportingBlock()}
+    <h2>Step 5 — pick a shape per run</h2>
+    <div class="grid">${FLOWS.map(flowBox).join('')}</div>
+    <h2>Automations</h2><div class="rules">${AUTOMATIONS.map(a => `<div class="card"><div class="top"><div class="name">${esc(a.name)}</div><span class="usage">${esc(a.when)}</span></div><div class="desc">${esc(a.body)}</div></div>`).join('')}
+      <div class="card"><div class="name" style="color:var(--accent);font-size:13px">${esc(REFERENCE.title)}</div><div class="desc">${esc(REFERENCE.sub)}</div><div class="usage"><a href="${REFERENCE.href}">${REFERENCE.href}</a></div></div></div>    <h2 id="skills">Skills — ${ref.shown} shown</h2>${ref.html}`;
+}
+
+/* ---- shell ---- */
+const app = document.getElementById('app');
+function render() {
+  state.q = document.getElementById('q').value.trim().toLowerCase();
+  app.innerHTML = board();
+  applySkillFilter();
+}
+function applySkillFilter() {
+  for (const card of document.querySelectorAll('main .card[data-name]')) {
+    const name = card.dataset.name, s = SKILL_INDEX[name];
+    const hay = card.dataset.s || name.toLowerCase();
+    const ok = (!state.q || hay.includes(state.q)) && (!state.src || card.dataset.src === state.src);
+    card.classList.toggle('hidden', !ok);
+  }
+  for (const sec of document.querySelectorAll('main section[data-sect]'))
+    sec.classList.toggle('hidden', !sec.querySelector('.card[data-name]:not(.hidden)'));
+}
+// A filter the reader did not type has to take them to what it filtered: the
+// skills live at the bottom of the page, so a chip or a skill pill that only
+// re-rendered in place looked like it did nothing.
+function revealSkills() {
+  render();
+  document.getElementById('skills')?.scrollIntoView({ block: 'start' });
+}
+
+// Section hides keep a group emptied by the filter from leaving a bare heading behind.
+document.getElementById('q').addEventListener('input', render);
+document.addEventListener('click', e => {
+  const jump = e.target.closest('[data-jump]');
+  if (jump) { e.preventDefault(); document.getElementById('q').value = jump.dataset.jump; revealSkills(); return; }
+  const step = e.target.closest('[data-step]');
+  if (step) {
+    e.preventDefault();
+    const id = step.dataset.step;
+    state.sel = state.sel === id ? null : id;
+    render();
+  }
+});
+document.getElementById('legend').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  state.src = state.src === chip.dataset.src ? null : chip.dataset.src;
+  revealSkills();
+});
+
+/* source legend + footer, built once */
+(function shell() {
+  const counts = {};
+  for (const [, skills] of SECTIONS) for (const [, , s] of skills) counts[s] = (counts[s] || 0) + 1;
+  document.getElementById('legend').innerHTML = Object.entries(SOURCES)
+    .filter(([k]) => counts[k])
+    .map(([k, s]) => `<span class="chip" data-src="${k}" style="color:${s.color}"><span class="dot" style="background:${s.color}"></span>${s.label} <b>${counts[k]}</b></span>`).join('');
+  document.getElementById('foot').innerHTML = `One hand-maintained page: the loop, the two run shapes, the standing rules and the skills table.
+    The loop and the run shapes are read from the <b>live</b> elements of <code>dev-workflow.excalidraw</code> and <code>diagram.excalidraw</code>,
+    and the skills table is lifted from <code>skills-cheatsheet.html</code> — all three in the dotfiles repo, <code>docs/</code>.
+    Clicking a skill pill filters to it; clicking a loop card opens what it produces.`;
+  render();
+})();
+</script>
+</body>
+</html>

@@ -35,6 +35,8 @@ The server adds:
 - `/snoozes`, `/acks` — the parking files (GET, and POST to change them)
 - `/status` — this process's producer stamp versus the snapshot's
 - `/attention-view.js` — the shared consumer rules the page loads
+- `/reference` — the workflow and skills reference page; static, renders no
+  snapshot
 
 Reads never collect. That is the whole point: the file is the artifact every
 surface consumes, and a refresh is one explicit producer run. If no file exists
