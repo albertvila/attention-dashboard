@@ -1209,6 +1209,7 @@ def _error(where, exc):
 
 DASHBOARD = os.path.join(HERE, "dashboard.html")
 CONSUMER_JS = os.path.join(HERE, "attention-view.js")
+REFERENCE = os.path.join(HERE, "reference.html")
 
 
 class Server(ThreadingHTTPServer):
@@ -1240,6 +1241,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(status())
         elif path == "/attention-view.js":
             self.send_file(CONSUMER_JS, "text/javascript; charset=utf-8")
+        elif path == "/reference":
+            self.send_file(REFERENCE, "text/html; charset=utf-8")
         elif path == "/refresh":
             self.send_json(refresh())
         else:
