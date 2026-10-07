@@ -143,7 +143,7 @@ Two things the board shows are **not** in the snapshot, because neither is true 
 "now" the way a snapshot is: a session is machine state that changes minute to
 minute, and a spec is a backlog nobody is waiting on. Both are read per request,
 the way parking is — the page asks `/sessions` and `/specs`, the server answers,
-nothing is stored, and a failed read costs the columns, never the queue.
+nothing is stored, and a failed read costs a rail, never the queue.
 
 **Sessions** come from two sources and say which one they came from. `herdr` is a
 pane herdr itself recognized an agent in — or a pane sitting inside a
@@ -151,12 +151,15 @@ pane herdr itself recognized an agent in — or a pane sitting inside a
 agent with a herdr pane, so it reports `origin: bb` and can be opened either way.
 `bb` is a bb thread, including an `active` one running somewhere with no local
 pane at all. Each session carries `busy` (an agent *working* right now, against a
-pane merely left open), which the column's colour reads, and `herdr` / `bb` — the
+pane merely left open), which the box's colour reads, and `herdr` / `bb` — the
 tab to focus and the thread to open.
 
-A session joins a card by **repository**, read from the checkout's own git remote,
-so no name guessing is involved. A Jira card names no repository, so nothing joins
-to it: for `FIRE-*` and friends the column never appears.
+The right rail is one box per **repository** with a session open on it, and every
+repository shows, whether or not the board carries a card for it — the rail is
+machine state, not a view of the queue. The repository name is the whole join to
+a card: it is on the card's own line and on the box. A Jira card names no
+repository, so nothing joins to it. The repository is read from the checkout's own
+git remote, so no name guessing is involved.
 
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and
@@ -292,9 +295,10 @@ from `attention-view.js`.
   tab records nothing and collects nothing.
 - **Needs you now** renders as generous blocks: title, states, facts, labels and
   the Jira line, then age, links and parking.
-- **Ready when you are** and **Waiting on others** render as compact rows: one
-  line while the name leaves room, otherwise the name takes the width it needs
-  and key, facts, age and parking move to the line below.
+- **Ready when you are** and **Waiting on others** render as compact rows: the
+  name and its states claim the first line, so the line under it — change mark,
+  author, repository or key, facts, detail — starts at the same edge in every
+  card, with age, links and parking at the row's right.
   Waiting renders the groups the rules hand back: rows sharing a title opening
   collapse behind `key · N items — the opening they share, counted`; rows that
   share none are plain rows, however they were bucketed.
@@ -311,12 +315,12 @@ from `attention-view.js`.
   no facts, just what it was and when it went — in the section it left.
 - An empty **Needs you now** names the next card that could be picked up (the
   rules' next-card line) instead of reading as an empty queue.
-- A card whose repository has an **agent session open on it** gets a column
-  outside the card, beside it: one row per session — green while an agent is
-  working, amber when blocked, grey when the pane is merely open — and each row
-  opens that session (`herdr` focuses the pane's tab, `bb` opens the thread).
-  A card with no session keeps its full width, which is what makes the column
-  itself the signal. Sessions are read from `/sessions` at every look.
+- **Ongoing work** is a right rail: one box per repository with an agent session
+  open on it — green while an agent is working, amber when blocked, grey when the
+  pane is merely open — one row per session, and each row opens that session
+  (`herdr` focuses the pane's tab, `bb` opens the thread). Sessions are read from
+  `/sessions` at every look, so the rail is machine state, never a snapshot, and
+  the repository name on the card is the whole join.
 - **Specs** are a left rail: the open issues I wrote with the `spec` label that
   nobody has taken (no assignee), each linking to GitHub, marked `already on the
   board` when the queue is already showing it. Browse material beside the board —
