@@ -167,7 +167,9 @@ the queue is showing anyway reads `already on the board`, because a spec you are
 looking at is not a suggestion.
 
 `POST /focus` is the one write that moves a window instead of a file: it runs
-`herdr tab focus <tab>` or `bb thread open <thread>`, only for a target matching
+`herdr tab focus <tab>` — which raises Herdr itself — or `bb thread open <thread>`
+followed by `open -a bb`, because bb's own CLI delivers the thread into the app
+without bringing its window forward. Only for a target matching
 `[A-Za-z0-9:_-]{1,64}`, and it is a POST so that loading a page can never move the
 reader's terminal.
 

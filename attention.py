@@ -1156,7 +1156,7 @@ def spec_issues(cli=None):
 
 def focus(request, cli=None):
     """Jump to the session a card's link named — the user's own terminal, on the
-    user's own machine. Two commands are reachable and only for an id that looks
+    user's own machine. Three commands are reachable and only for an id that looks
     like one, because this moves the window the reader is looking at: it is a
     POST, never something a page can trigger by being loaded."""
     cli = cli or LIVE
@@ -1165,16 +1165,21 @@ def focus(request, cli=None):
     if not isinstance(target, str) or not FOCUS_TARGET.match(target):
         return {"ok": False, "error": "bad target"}
     if kind == "herdr":
-        command, args = "herdr", ["tab", "focus", target]
+        # `tab focus` switches Herdr's own window to the pane: it raises itself.
+        commands = [("herdr", ["tab", "focus", target])]
     elif kind == "bb":
-        command, args = "bb", ["thread", "open", target]
+        # bb delivers the thread into the app but leaves its window where it was,
+        # so the jump raises it too — otherwise nothing appears to happen.
+        commands = [("bb", ["thread", "open", target]), ("open", ["-a", "bb"])]
     else:
         return {"ok": False, "error": "unknown kind"}
+    ran = [c + " " + " ".join(a) for c, a in commands]
     try:
-        cli.text(command, args)
+        for command, args in commands:
+            cli.text(command, args)
     except Exception as e:
-        return {"ok": False, "ran": command + " " + " ".join(args), "error": str(e)[:200]}
-    return {"ok": True, "ran": command + " " + " ".join(args)}
+        return {"ok": False, "ran": " && ".join(ran), "error": str(e)[:200]}
+    return {"ok": True, "ran": " && ".join(ran)}
 
 
 def _park(key, value, path, data):
