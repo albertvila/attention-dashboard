@@ -282,9 +282,11 @@ from `attention-view.js`.
 
 - It opens with the day and the rules' summary sentence — what is new, changed
   and dropped since your last look (`gha.seenAt`) — with the snapshot age and
-  the producer stamp underneath, and the refresh rule after them: when the page
-  takes focus — opening the tab, switching back to it — a snapshot older than an
-  hour refreshes itself (live collection, ~20s), never on a timer.
+  the producer stamp underneath, and the refresh rule after them: a snapshot
+  older than an hour refreshes itself (live collection, ~20s) when the page takes
+  focus — opening the tab, switching back to it — and, while the tab is visible,
+  on a five-minute sweep, so a page left open on a screen does not rot. A hidden
+  tab records nothing and collects nothing.
 - **Needs you now** renders as generous blocks: title, states, facts, labels and
   the Jira line, then age, links and parking.
 - **Ready when you are** and **Waiting on others** render as compact rows: one
@@ -332,4 +334,5 @@ do refresh.
 ```bash
 python3 -m unittest -v test_view_model   # fixtures -> view model, contract, diff, parking
 node test_attention_view.mjs             # the shared consumer rules
+node test_dashboard_sweep.mjs            # the visible-tab sweep — and what a hidden tab must not do
 ```
