@@ -79,18 +79,8 @@
     const acks = opts.acks || {};
     const now = opts.now || new Date().toISOString();
     const since = seenAt || (data.changes || {}).previousAt || null;
-    const sessions = opts.sessions || {};
-    const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || [])
-      .map(withSessions);
+    const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || []);
     const gone = (data.changes || {}).gone || [];
-
-    /** The repo a card is about, and the only thing a session can join on: a
-        Jira card carries none, so nothing joins to it. Copy, never mutate — the
-        snapshot is handed to every surface as it arrived. */
-    function withSessions(row) {
-      const live = sessions[row.container || ''];
-      return live && live.length ? Object.assign({}, row, {sessions: live}) : row;
-    }
 
     const isMail = row => row.chip === 'MAIL';
     // A Jira card in Support Investigating is waiting in the snapshot, and
@@ -124,7 +114,7 @@
     }
 
     const tiers = (data.tiers || []).map(t => {
-      const list = t.items.filter(work).concat(ghosts(t.key)).map(withSessions);
+      const list = t.items.filter(work).concat(ghosts(t.key));
       // Waiting is where the noise piles up, so the rules hand it back grouped
       // rather than let a surface invent the groups. The rows are the same rows
       // in the same order; the other tiers carry no groups at all.

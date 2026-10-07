@@ -29,11 +29,13 @@ button:hover{background:#30363d}
 .sentence{font-size:24px;line-height:1.25;font-weight:400;margin:6px 0 4px;text-transform:none;letter-spacing:normal;color:#e6edf3}
 .sub{margin:0;color:#8b949e;font-size:12px}
 main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
-  grid-template-columns:250px minmax(0,1fr);gap:26px;align-items:start}
-/* The specs rail is browse material, not a tier: it holds no counts and nothing
-   in it can be parked. Under 1200px it drops below the board rather than
-   squeeze it, and an ongoing-work column folds under its own card. */
-@media (max-width:1200px){main{grid-template-columns:1fr}#specs{order:2}.ongoing{grid-template-columns:minmax(0,1fr)}}
+  grid-template-columns:250px minmax(0,1fr) 262px;gap:26px;align-items:start}
+/* Two rails read beside the board, never in it: specs on the left (browse
+   material — no counts, nothing parkable), ongoing work on the right (live
+   machine state). Browse material drops below the board first, so live work
+   keeps its column; under 1000px everything stacks. */
+@media (max-width:1400px){main{grid-template-columns:minmax(0,1fr) 262px}#specs{order:2;grid-column:1/-1}}
+@media (max-width:1000px){main{grid-template-columns:1fr}#sessions{order:2}#specs{order:3}}
 #app{min-width:0}
 .rail{position:sticky;top:120px;border:1px solid #30363d;border-radius:8px;padding:12px 14px;background:#0d1117}
 .rail h2{margin:0 0 4px}
@@ -43,10 +45,9 @@ a.spec:hover .spectitle{text-decoration:underline}
 .specref{display:block;color:#79c0ff;font-size:11px;margin-bottom:2px}
 .spectitle{display:block;font-size:12.5px;line-height:1.35}
 .specage{display:block;color:#8b949e;font-size:11px;margin-top:3px}
-/* A card with a session open on it keeps its width and gets a column of its own
-   outside the card — the work should be visible from across the room. */
-.ongoing{display:grid;grid-template-columns:minmax(0,1fr) 262px;gap:16px;align-items:stretch}
-.sessioncol{display:flex;flex-direction:column;gap:5px;padding:11px 13px;
+/* One box per repository with a session open on it, in the right rail, outside
+   every card — the work should be visible from across the room. */
+.sessioncol{display:flex;flex-direction:column;gap:5px;padding:11px 13px;margin-top:8px;
   border:1px solid #3fb95055;border-left:3px solid #3fb950;border-radius:8px;
   background:#3fb9500d;color:#e6edf3}
 .sessioncol .collabel{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#7ee787;font-weight:700}
@@ -71,7 +72,9 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 /* One card renderer, two emphases: a generous 'block' for the Needs tier a
    reader must actually read, a terse 'line' for Ready, Waiting and the folds.
    Both carry the same parts — states, facts, labels, jira line, links, age,
-   parking — the layout only chooses emphasis. */
+   parking — the layout only chooses emphasis. A line's name owns a line of its
+   own, so the meta line under it starts at the same edge in every card: the
+   repo, key and author never land wherever they happen to fit. */
 .row{display:flex;gap:10px;align-items:flex-start;border-left:3px solid #30363d}
 .body{min-width:0}
 .block{padding:2px 2px 14px 14px;margin-bottom:16px}
@@ -85,7 +88,7 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .line{padding:8px 2px 8px 8px;border-bottom:1px solid #21262d}
 .line>.chip{align-self:center}
 .line .body{flex:1;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-.line .title{flex:1 1 auto;align-items:center}
+.line .title{flex:1 1 100%;align-items:center}
 .line .title a{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
 .line .meta{display:flex;gap:6px;align-items:center;font-size:12px}
 .title{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;min-width:0}
@@ -189,11 +192,13 @@ pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;color:#c9d1d9;max-height:
 <main>
   <aside id="specs" class="rail"></aside>
   <div id="app"></div>
+  <aside id="sessions" class="rail"></aside>
 </main>
 <script src="attention-view.js"></script>
 <script>
 const app = document.getElementById('app');
 const specsRail = document.getElementById('specs');
+const sessionsRail = document.getElementById('sessions');
 const stamp = document.getElementById('stamp');
 const day = document.getElementById('day');
 const sentence = document.getElementById('sentence');
@@ -248,7 +253,7 @@ async function load(isRefresh){
     const backlog = await specRes.json().catch(() => ({}));
     specs = backlog.issues || []; specErrors = backlog.errors || [];
     snap = data;
-    view = AttentionView.overlay(data, {seenAt, snoozes, acks, sessions, specs});
+    view = AttentionView.overlay(data, {seenAt, snoozes, acks, specs});
     render(data);
     /* The Briefing opens with the sentence; the snapshot's own stamp stays
        underneath it. */
@@ -278,8 +283,6 @@ function render(data){
   /* A failed source means a smaller queue, not a smaller workload: say so
      before the tiers, not after the help box. */
   for(const e of data.errors) app.appendChild(errBox(e, '\u26a0 ' + e.where + ' failed — this queue is partial'));
-  /* A failed session read costs the ongoing-work columns, not the queue. */
-  for(const e of sessionErrors) app.appendChild(errBox(e, '\u26a0 ' + e.where + ' failed — ongoing work is not shown'));
   for(const tier of view.tiers){
     const s = document.createElement('section');
     s.appendChild(el('h2', null, tier.title + ' · ' + tier.count));
@@ -291,7 +294,7 @@ function render(data){
       // behind one line naming them; anything else is plain rows.
       for(const g of tier.groups){
         if(g.rows.length === 1 || !g.note){
-          for(const r of g.rows) s.appendChild(place(r, 'line'));
+          for(const r of g.rows) s.appendChild(card(r, 'line'));
           continue;
         }
         const d = document.createElement('details');
@@ -300,11 +303,11 @@ function render(data){
         sum.appendChild(el('b', null, g.key));
         sum.appendChild(document.createTextNode(' · ' + g.rows.length + ' items — ' + g.note));
         d.appendChild(sum);
-        for(const r of g.rows) d.appendChild(place(r, 'line'));
+        for(const r of g.rows) d.appendChild(card(r, 'line'));
         s.appendChild(d);
       }
     }else{
-      for(const it of tier.rows) s.appendChild(place(it, tier.key === 'needs' ? 'block' : 'line'));
+      for(const it of tier.rows) s.appendChild(card(it, tier.key === 'needs' ? 'block' : 'line'));
     }
     app.appendChild(s);
   }
@@ -323,13 +326,14 @@ function render(data){
     'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Starred mail fold instead of the tiers. The star is membership and nothing else; the badge follows who sent the last message: waiting reply when that was you, needs reply when it was someone else. Un-star one to clear it; nothing here changes your mail.',
     'Support — a Jira ticket in Support Investigating is waiting on others, and renders in the collapsed With support fold rather than the Waiting queue. Expand the fold to read it.',
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, unread mail, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
-    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age.',
-    'Ongoing work — a card whose repository has an agent session open on it gets a column outside the card: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look; a Jira card names no repository, so nothing joins to it.',
+    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up.',
+    'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. One that the queue is showing anyway reads "already on the board".',
-    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
+    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Parking — the picker on each card snoozes it until a time (4 hours / 1 day / 3 days / 1 week) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
   ]));
   paintSpecs();
+  paintSessions();
 }
 
 /* Every card carries its count and the note the rules give it; a fold the rules
@@ -342,7 +346,7 @@ function foldBox(title, items, note){
   s.appendChild(document.createTextNode(' · ' + items.length));
   if(note) s.appendChild(el('span','fold-note',' — ' + note));
   d.appendChild(s);
-  for(const it of items) d.appendChild(place(it, 'line'));
+  for(const it of items) d.appendChild(card(it, 'line'));
   return d;
 }
 
@@ -385,15 +389,16 @@ async function focusSession(btn, link){
   setTimeout(() => btn.classList.remove('ok','bad'), 1500);
 }
 
-/* A card's session column, drawn outside the card: one row per session, and every
+/* A repository's session box in the right rail: one row per session, and every
    row opens its own session. Working is green, blocked amber, a pane merely left
-   open grey — an idle session must not read as work in progress. */
-function sessionColumn(row){
-  const live = row.sessions || [];
+   open grey — an idle session must not read as work in progress. The repository
+   is the box's label because it is also the only thing a card can join to: a
+   Jira card names no repo, so nothing joins to it. */
+function sessionBox(repo, live){
   const tone = !live.some(s => s.busy) ? 'idle'
     : (live.some(s => s.state === 'blocked') ? 'busy' : '');
   const col = el('div','sessioncol ' + tone);
-  col.appendChild(el('span','collabel','ongoing work'));
+  col.appendChild(el('span','collabel', repo.split('/').pop()));
   const state = el('span','colstate');
   state.appendChild(el('i','dot'));
   state.appendChild(document.createTextNode(stateLine(live)));
@@ -417,21 +422,23 @@ function sessionColumn(row){
     }
     col.appendChild(line);
   }
-  col.title = live.map(s => s.agent + ' ' + s.state + (s.label ? ' — ' + s.label : '')
+  col.title = repo + '\n' + live.map(s => s.agent + ' ' + s.state + (s.label ? ' — ' + s.label : '')
     + ' [' + originOf(s) + ']').join('\n');
   return col;
 }
 
-/* A card with a session open on it keeps its width and gets the column beside it;
-   a card with none stays a full-width row, which is what makes the column itself
-   the signal. */
-function place(row, kind){
-  const c = card(row, kind);
-  if(!(row.sessions || []).length) return c;
-  const item = el('div','ongoing');
-  item.appendChild(c);
-  item.appendChild(sessionColumn(row));
-  return item;
+/* Every repository with a session open on it right now, one box each. Read live
+   from herdr and bb at every look, so this rail is machine state and never part
+   of the snapshot; a failed read costs the rail, never the queue. */
+function paintSessions(){
+  const repos = Object.entries(sessions || {}).filter(([, live]) => live.length);
+  sessionsRail.innerHTML = '';
+  sessionsRail.appendChild(el('h2', null, 'Ongoing work \u00b7 '
+    + repos.reduce((n, [, live]) => n + live.length, 0)));
+  sessionsRail.appendChild(el('p','railtip','Agent sessions open right now, one box per repository: green while an agent works, amber blocked, grey merely open. A card whose repository is here is being worked on.'));
+  for(const e of sessionErrors) sessionsRail.appendChild(el('p','railtip','\u26a0 ' + e.where + ' failed'));
+  if(!repos.length && !sessionErrors.length) sessionsRail.appendChild(el('p','railtip','No session open right now.'));
+  for(const [repo, live] of repos) sessionsRail.appendChild(sessionBox(repo, live));
 }
 
 /* The specs rail: issues I wrote with the spec label, waiting for nobody. Browse

@@ -308,31 +308,20 @@ assert.equal(new Set(flat).size, flat.length);                         // once e
 assert.equal('groups' in view.tiers[0], false);
 assert.equal('groups' in view.tiers[1], false);
 
-// --- sessions on a card, specs beside it ------------------------------------
-// Live machine state and a backlog, joined to the board by repository. The
-// snapshot is handed in untouched: a card that has no session stays the very row
-// the producer wrote.
-const liveSessions = { 'Launchmetrics/LM-shared': [
-  {agent:'pi', state:'working', busy:true, origin:'herdr', label:'\u03c0 - LM-shared',
-   pane:'wN:p1', herdr:{tab:'wN:t1', workspace:'wN'}, bb:null},
-  {agent:'pi', state:'idle', busy:false, origin:'bb', label:'\u03c0 - worktree',
-   pane:'w4:p3', herdr:{tab:'w4:t3', workspace:'w4'}, bb:{thread:'thr_sa8ywf5fsx'}}]};
+// --- specs beside the board -------------------------------------------------
+// A backlog, joined to the board by key. The snapshot is handed in untouched:
+// every row is the very row the producer wrote.
 const sessData = data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
   { key: 'waiting', title: 'w', items: [row({ key: 'Launchmetrics/LM-shared#412', ref: 'LM-shared#412',
-                                                container: 'Launchmetrics/LM-shared' }),
-                                          row({ key: 'FIRE-1', ref: 'FIRE-1' })] }] });
-view = overlay(sessData, { now: NOW, sessions: liveSessions,
+                                                container: 'Launchmetrics/LM-shared' })] }] });
+view = overlay(sessData, { now: NOW,
                            specs: [{ ref: 'Launchmetrics/LM-shared#412' }, { ref: 'Launchmetrics/PLS-rubn#9' }] });
-byKey = Object.fromEntries(view.tiers[2].rows.map(r => [r.key, r]));
-assert.equal(byKey['Launchmetrics/LM-shared#412'].sessions.length, 2);   // both readings survive
-assert.equal(byKey['FIRE-1'].sessions, undefined);        // a Jira card names no repo: nothing joins
-assert.equal('sessions' in sessData.tiers[2].items[0], false);           // the snapshot is not written to
 assert.deepEqual(view.specs.map(s => [s.ref, s.onBoard]),
   [['Launchmetrics/LM-shared#412', true], ['Launchmetrics/PLS-rubn#9', false]]);
-// with nothing read, no card grows a column and every spec reads as a suggestion
+// with nothing read, every spec reads as a suggestion and no card grows anything
 view = overlay(data(), { now: NOW });
 assert.deepEqual(view.specs, []);
-assert.equal(view.tiers[2].rows.some(r => r.sessions), false);
+assert.equal(view.tiers[2].rows.some(r => 'sessions' in r), false);
 
 // --- fold summaries: what a collapsed fold is hiding ------------------------
 const mailRow = (over = {}) => row({ chip: 'MAIL', key: 'mail/' + (over.id || '1'), ref: '',
