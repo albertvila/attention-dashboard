@@ -14,13 +14,18 @@
 (function (global) {
   'use strict';
 
+  /** The states that read as finished work — the producer's closed vocabulary
+      (merged, closed, done). A row that closed is never "new" and renders
+      struck, wherever it rides: first sighting of closed work is a closure, not
+      a card you just picked up. */
+  const CLOSED_STATES = ['merged', 'closed', 'done'];
+  const isClosed = row => CLOSED_STATES.indexOf(((row.states || [])[0] || {}).key) !== -1;
+
   /** Which rows a change flag applies to, and what it says. */
   function flagOf(row, since) {
     if (row.change && row.change.kind === 'gone') return { kind: 'gone' };
     if (!since) return null;
-    // Recently closed is exempt from "new": a card that closes while you are
-    // away is first seen in that window, but it closed — it is not a new card.
-    if (row.section !== 'closed' && row.firstSeenAt && row.firstSeenAt > since) return { kind: 'new' };
+    if (!isClosed(row) && row.firstSeenAt && row.firstSeenAt > since) return { kind: 'new' };
     if (row.lastChangedAt && row.lastChangedAt > since) return row.lastChange || { kind: 'moved', label: 'changed' };
     return null;
   }
@@ -212,6 +217,7 @@
     return {
       snoozeOf, ackOf, parked, specs,
       flag: row => flagOf(row, since),
+      closed: isClosed,
       tiers, folds, notes, nextCard, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
