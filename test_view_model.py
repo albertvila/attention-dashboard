@@ -705,7 +705,7 @@ class OpenSessions(unittest.TestCase):
 
         def text(self, command, args):
             self.calls.append([command] + list(args))
-            if command in ("herdr", "bb"):      # the focus action itself
+            if command in ("herdr", "bb", "open"):   # the focus action itself
                 return ""
             url = self.remotes.get(args[1], "")
             if not url:
@@ -768,6 +768,16 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(out["repos"], {})
         self.assertEqual([e["where"] for e in out["errors"]], ["herdr sessions"])
 
+    def test_a_failed_jump_says_which_command_failed(self):
+        class Stubborn(self.Fake):
+            def text(self, command, args):
+                self.calls.append([command] + list(args))
+                raise attention.CliError(command, "no such thread")
+        out = attention.focus({"kind": "bb", "target": "thr_x"}, cli=Stubborn())
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["ran"], "bb thread open thr_x && open -a bb")
+        self.assertEqual(out["error"], "no such thread")
+
     def test_specs_are_the_unassigned_issues_i_wrote_with_that_label(self):
         """An assignee means someone is already on it — usually me, which is why
         those are already on the board — so a taken spec is not groundwork."""
@@ -789,17 +799,19 @@ class OpenSessions(unittest.TestCase):
         failed = attention.spec_issues(cli=self.Fake(fail=("gh",)))
         self.assertEqual((failed["issues"], [e["where"] for e in failed["errors"]]), ([], ["spec issues"]))
 
-    def test_focus_runs_only_the_two_commands_and_only_for_an_id(self):
+    def test_focus_runs_only_the_commands_a_session_needs_and_only_for_an_id(self):
         cli = self.Fake()
         self.assertEqual(attention.focus({"kind": "herdr", "target": "wN:t1"}, cli=cli),
                          {"ok": True, "ran": "herdr tab focus wN:t1"})
         self.assertEqual(cli.calls[-1], ["herdr", "tab", "focus", "wN:t1"])
-        attention.focus({"kind": "bb", "target": "thr_sa8ywf5fsx"}, cli=cli)
-        self.assertEqual(cli.calls[-1], ["bb", "thread", "open", "thr_sa8ywf5fsx"])
+        # bb delivers into the app without raising it, so the jump raises it too
+        self.assertEqual(attention.focus({"kind": "bb", "target": "thr_sa8ywf5fsx"}, cli=cli),
+                         {"ok": True, "ran": "bb thread open thr_sa8ywf5fsx && open -a bb"})
+        self.assertEqual(cli.calls[-2:], [["bb", "thread", "open", "thr_sa8ywf5fsx"], ["open", "-a", "bb"]])
         for bad in ({"kind": "herdr", "target": "wN:t1; whoami"}, {"kind": "herdr", "target": ""},
                     {"kind": "shell", "target": "wN:t1"}, {}):
             self.assertFalse(attention.focus(bad, cli=cli)["ok"], bad)
-        self.assertEqual(len(cli.calls), 2)          # nothing else ever reached the CLI
+        self.assertEqual(len(cli.calls), 3)          # nothing else ever reached the CLI
 
 
 class Snoozes(unittest.TestCase):

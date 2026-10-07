@@ -286,20 +286,6 @@ const SUPPORTING = [
   { cmd:'/improve-codebase-architecture', why:'scan for deepening opportunities', skill:'improve-codebase-architecture' },
 ];
 
-/* ---- standing rules, straight from dotfiles/AGENTS.md ---- */
-const RULES = [
-  ['Align before code', 'nothing gets built until the decisions are settled.'],
-  ['Smallest diff that works', 'ponytail is in force by default — stdlib, then native, then a line.'],
-  ['Root cause only', 'a fix that leaves a sibling caller broken is not done.'] ,
-  ['Done means demonstrated', 'tests run, behaviour verified — not just code written.'],
-  ['TDD feedback loop', 'red → green → refactor, one slice at a time.'],
-  ['Fresh eyes before commit', 'review the diff against the standards and the spec.'],
-  ['Commit and push only when I say so', 'the agent proposes the message and the file list; I answer.'],
-  ['Broken windows fixed on sight', 'lint errors, failing tests, flakiness — even unrelated ones.'],
-  ['Replacements delete what they replace', 'no compat layers, fallbacks or dead paths left behind.'],
-  ['Spec and tickets from master', '/to-spec + /to-tickets run from the master/main checkout, never in a worktree.'],
-];
-
 /* ---- the two run shapes: pick one per run, at step 5 ---- */
 const FLOWS = [
   { key:'A', title:'Flow A — single shared PR', tag:'DEFAULT',
