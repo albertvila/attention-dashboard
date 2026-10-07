@@ -58,6 +58,11 @@ STATES = {
     "closed": (WAITING, "closed", "quiet"),
 }
 
+# What a row's first state reads once the work is finished (see _closed_pr_item,
+# _closed_issue_item, items_from_jira_closed). A gone row carrying one of these
+# belongs in the closed lane, not in the tier it was last rendered in.
+CLOSED_STATES = ("merged", "closed", "done")
+
 
 def _state(key):
     """One state -> the chip a surface renders; an unknown state reads as
@@ -116,7 +121,17 @@ JIRA_CLOSED_FIELDS = JIRA_FIELDS + ",statuscategorychangeddate"
 # The inward text of the link type that holds a ticket up: the linked issue is
 # the blocker, and Jira hands back its status and summary with the link itself.
 JIRA_BLOCKED_BY = "is blocked by"
+# Two horizons, on purpose. A closed row is *shown* in Recently closed for a day,
+# and it is *collected* for as long as a ghost can appear (GONE_WINDOW_HOURS), so a
+# live card keeps its closed members for as long as the memory of them matters —
+# otherwise a member expires, falls out of its card, and ghosts into the tier it
+# left, as work that is still owed.
 CLOSED_WINDOW_HOURS = 24
+# Gone rows stay in the snapshot long enough for a surface that was not open when
+# they vanished; consumers filter by their own last-look timestamp.
+GONE_WINDOW_HOURS = 24 * 7
+CLOSED_MEMORY_HOURS = GONE_WINDOW_HOURS
+MAX_GONE = 100
 # Mail: the star is the gate — every starred thread shows up, archived ones
 # included, and un-starring is how it leaves. A `group/<name>` label on several
 # threads merges them into one card; see the dashboard help section.
@@ -126,7 +141,7 @@ MAIL_MAX = 50
 MAIL_GROUP_PREFIX = "group/"
 
 JIRA_CLOSED_JQL = ("assignee = currentUser() AND statusCategory = Done "
-                   "AND statuscategorychangeddate >= -1d "
+                   "AND statuscategorychangeddate >= -%dd " % (CLOSED_MEMORY_HOURS // 24) +
                    "AND status not in (" + ", ".join(f'"{s}"' for s in DEPLOY_STATUSES) + ") "
                    "ORDER BY statuscategorychangeddate DESC")
 # GitHub issue/PR URLs inside Jira text -> owner/repo#number links.
@@ -143,6 +158,12 @@ ISSUE_REF = re.compile(r"(?<![\w/])#(\d+)")
 # `title` rides along because a child without a ref (mail) has nothing else to
 # render as its link text.
 CHILD_FIELDS = ("chip", "key", "ref", "title", "url", "states", "age", "detail", "facts", "labels", "times")
+
+
+def _closed_updated(group):
+    """The newest closure stamp in a cluster: `times.updated` is the closure for
+    every closed source, and a cluster is as fresh as its freshest member."""
+    return max((i.get("times", {}).get("updated") or "" for i in group), default="")
 
 
 def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
@@ -166,7 +187,11 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
         kids = [r for r in rows[1:] if r["ref"] != jira_key]
         rows[0]["children"] = [{k: r[k] for k in CHILD_FIELDS} for r in kids]
         if all(id(item) in closed_ids for item in group):
-            closed_rows.append(rows[0])
+            # The lane shows the last day, however long closed work is collected
+            # for: a finished cluster older than that drops out, and a surface
+            # that was not open when it left sees it struck in the lane.
+            if _within_window(_closed_updated(group), now):
+                closed_rows.append(rows[0])
         else:
             # drafts are tests/POCs: out of the attention tiers, into their own section.
             (drafts if rows[0]["draft"] else buckets[rows[0]["tier"]]).append(rows[0])
@@ -353,11 +378,6 @@ def _iter_rows(view):
                 yield section, child
 
 
-# Gone rows stay in the snapshot long enough for a surface that was not open
-# when they vanished; consumers filter by their own last-look timestamp.
-GONE_WINDOW_HOURS = 24 * 7
-MAX_GONE = 100
-
 
 def with_changes(view, previous=None, now=None):
     """Annotate every row versus `previous` and return the change block.
@@ -420,7 +440,8 @@ def with_changes(view, previous=None, now=None):
         if key in seen:
             continue
         gone = {k: v for k, v in row.items() if k != "change"}
-        gone.update({"section": section, "goneAt": stamp, "change": {"kind": "gone"}})
+        gone.update({"section": "closed" if _row_state(row) in CLOSED_STATES else section,
+                     "goneAt": stamp, "change": {"kind": "gone"}})
         fresh.append(gone)
     carried = [g for g in ((previous or {}).get("changes") or {}).get("gone") or []
                if _row_key(g) not in seen
@@ -1238,9 +1259,10 @@ def collect_payload(previous=None):
 
 
 def _collect_closed(cli, me, now, errors):
-    """Items closed/merged in the last CLOSED_WINDOW_HOURS, across all sources.
-    GraphQL search: one call per source, and it carries the issue/PR links."""
-    since = (now - timedelta(hours=CLOSED_WINDOW_HOURS)).strftime("%Y-%m-%d")
+    """Items closed/merged in the last CLOSED_MEMORY_HOURS, across all sources —
+    wider than the lane shows, so a card that is still live keeps its closed
+    members. GraphQL search: one call per source, and it carries the issue/PR links."""
+    since = (now - timedelta(hours=CLOSED_MEMORY_HOURS)).strftime("%Y-%m-%d")
     who = me or "@me"
     closed, seen = [], set()
     for qualifier, chip in (("author", "MY PR"), ("reviewed-by", "REVIEWED")):
@@ -1256,7 +1278,7 @@ def _collect_closed(cli, me, now, errors):
             continue
         for node in nodes:
             key = f'{node["repository"]["nameWithOwner"]}#{node["number"]}'
-            if key in seen or not _within_window(node.get("closedAt"), now):
+            if key in seen or not _within_window(node.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS):
                 continue
             seen.add(key)
             closed.append(_closed_pr_item(node, chip))
@@ -1269,7 +1291,7 @@ def _collect_closed(cli, me, now, errors):
              ) % (who, since)
     try:
         nodes = cli.graphql(query)["data"]["search"]["nodes"]
-        closed += [_closed_issue_item(n) for n in nodes if _within_window(n.get("closedAt"), now)]
+        closed += [_closed_issue_item(n) for n in nodes if _within_window(n.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS)]
     except Exception as e:
         errors.append(_error("closed issues", e))
     try:

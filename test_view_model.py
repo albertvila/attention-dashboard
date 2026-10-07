@@ -511,6 +511,51 @@ class ClosedLog(unittest.TestCase):
         after = attention.payload(attention.build_view([dict(merged, links=["o/r#7"])], now=NOW), previous=before)
         self.assertEqual(after["changes"]["items"]["o/r#7"]["label"], "moved")
 
+    def test_the_lane_shows_a_day_however_long_closed_work_is_collected(self):
+        """Two horizons, two jobs: a finished cluster leaves the lane a day after
+        it closed, while the collection that keeps a live card's closed members
+        runs for as long as a ghost could appear."""
+        def cluster(closed_at):
+            return [attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
+                                    times={"updated": closed_at})]
+        fresh = attention.build_view([], now=NOW, closed=cluster("2026-09-29T10:00:00Z"))
+        stale = attention.build_view([], now=NOW, closed=cluster("2026-09-26T10:00:00Z"))
+        self.assertEqual([r["ref"] for r in fresh["closed"]], ["r#5"])
+        self.assertEqual(stale["closed"], [])
+
+    def test_closed_work_is_collected_past_the_lane_so_a_live_card_keeps_its_member(self):
+        """A closed member of a card that is still live must keep being collected:
+        the moment it stops, it falls out of the card and ghosts into the tier it
+        left, as work that is still owed (BIT-databricks#2059, PLS-databricks#352)."""
+
+        class Fake:
+            """Only the reads _collect_closed makes: two graphql searches, one twg."""
+            def __init__(self, prs=()):
+                self.prs, self.queries = list(prs), []
+
+            def graphql(self, query):
+                self.queries.append(query)
+                return {"data": {"search": {"nodes": self.prs if "is:pr" in query else []}}}
+
+            def json(self, command, args):
+                return {"data": {"issues": []}}
+
+        days_ago = NOW - timedelta(days=3)
+        node = {"number": 59, "title": "t", "url": "u", "state": "MERGED",
+                "closedAt": days_ago.isoformat().replace("+00:00", "Z"),
+                "createdAt": days_ago.isoformat().replace("+00:00", "Z"),
+                "headRefName": "m-chore-x-RBT-723", "repository": {"nameWithOwner": "o/r"},
+                "author": {"login": "me"}, "labels": {"nodes": []},
+                "closingIssuesReferences": {"nodes": []}}
+        cli, errors = Fake(prs=[node]), []
+        closed = attention._collect_closed(cli, "me", NOW, errors)
+        self.assertEqual(errors, [])
+        self.assertEqual([(i["ref"], i["jira"].rsplit("/", 1)[-1]) for i in closed],
+                         [("r#59", "RBT-723")])
+        since = (NOW - timedelta(hours=attention.CLOSED_MEMORY_HOURS)).strftime("%Y-%m-%d")
+        self.assertEqual(attention.CLOSED_MEMORY_HOURS, attention.GONE_WINDOW_HOURS)
+        self.assertIn(f"closed:>={since}", cli.queries[0])
+
     def test_all_closed_cluster_stays_in_the_closed_log(self):
         closed = [
             attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
@@ -1076,12 +1121,27 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(after["changes"]["summary"]["gone"], 0)   # not dropped
         self.assertEqual(after["changes"]["items"][children[0]["key"]]["kind"], "moved")
 
+    def test_a_gone_row_that_ended_closed_ghosts_into_the_closed_lane(self):
+        """A member that expires out of a card it rode in belongs to the lane it
+        ended in — not to the tier it was last drawn in, where 'dropped' reads as
+        work still owed."""
+        open_item = attention._item("ISSUE", container="o/r", ref="r#9", states=["waiting"])
+        merged = attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
+                                 times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#9"])
+        before = attention.payload(attention.build_view([open_item], now=NOW, closed=[merged]), now=NOW)
+        card = before["tiers"][1]["items"][0]                 # merged ranks above waiting
+        self.assertEqual(card["ref"], "r#5")
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#9"])
+        after = attention.payload(attention.build_view([open_item], now=NOW, closed=[]), previous=before, now=NOW)
+        self.assertEqual([g["section"] for g in after["changes"]["gone"]], ["closed"])
+        self.assertEqual(after["changes"]["gone"][0]["ref"], "r#5")
+
     def test_closed_cards_are_never_new(self):
         """A PR that closes while you are away enters Recently closed for the
         first time — that is a closure, not a new card."""
         reviewed = attention._item("REVIEWED", container="o/r", ref="o/r#9", title="pr 9",
                                    url="https://x/9", states=["merged"],
-                                   times={"updated": "2026-09-28T11:00:00Z"})
+                                   times={"updated": "2026-09-28T14:00:00Z"})
         after = attention.payload(attention.build_view([], now=NOW, closed=[reviewed]), now=NOW)
         row = after["closed"][0]
         self.assertEqual(row["section"], "closed")
@@ -1089,7 +1149,7 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(after["changes"]["items"], {})
         self.assertEqual(after["changes"]["summary"], {"new": 0, "moved": 0, "gone": 0})
         # the honest stamp is the closure time, so a reader can still see it is fresh
-        self.assertEqual(row["firstSeenAt"], "2026-09-28T11:00:00Z")
+        self.assertEqual(row["firstSeenAt"], "2026-09-28T14:00:00Z")
 
     def test_rows_carry_their_section(self):
         view = self.view([self.item(1, "waiting")])
