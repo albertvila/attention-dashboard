@@ -197,11 +197,13 @@ const sentence = document.getElementById('sentence');
 /* The rules live in attention-view.js: this page only renders what the overlay
    hands it. */
 const SEEN_KEY = 'gha.seenAt';
-/* A look at a snapshot older than this refreshes it, live collection and all.
-   No timer — the page taking focus (an open usually does) is the only trigger —
+/* A look at a snapshot older than this refreshes it, live collection and all,
    and the header says the rule from this same number, so they cannot drift. */
 const STALE_MS = 60 * 60 * 1000;
 const STALE_LABEL = STALE_MS / 3600000 + 'h';
+/* How often a visible tab looks: the gate above still decides whether that look
+   refreshes or only stamps. */
+const SWEEP_MS = 5 * 60 * 1000;
 let seenAt = null;
 try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
 let snoozes = {}, acks = {}, status = null, view = null;
@@ -210,7 +212,8 @@ let snap = null, refreshing = false, looking = false;
 
 /* The last look belongs to a reader who is actually looking: a hidden or
    restored tab records nothing, and coming back to a snapshot older than
-   STALE_MS refreshes it instead. No timer — focus is the only trigger. */
+   STALE_MS refreshes it instead. Focus is one trigger; a visible page also
+   sweeps, so a tab left open on a screen does not rot while you watch it. */
 function stampSeen(){
   if(document.visibilityState !== 'visible' || !snap) return;
   try { localStorage.setItem(SEEN_KEY, snap.generatedAt); } catch(e) {}
@@ -250,7 +253,7 @@ async function load(isRefresh){
     sentence.textContent = view.summaryText();
     stamp.textContent = 'snapshot ' + ageOf(data.generatedAt)
       + ((data.producer || {}).code ? ' · producer ' + data.producer.code : '')
-      + ' · refreshes itself on focus once it is over ' + STALE_LABEL + ' old';
+      + ' · refreshes itself on focus or on a visible sweep once it is over ' + STALE_LABEL + ' old';
     if(looking){ looking = false; look(); } else stampSeen();
   }catch(e){
     app.innerHTML = '';
@@ -666,5 +669,8 @@ function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className
 document.getElementById('refresh').onclick = () => load(true);
 document.addEventListener('visibilitychange', look);
 window.addEventListener('focus', look);
+/* A visible page is a reader who is looking, and look() either stamps that look
+   or refreshes a stale snapshot. Hidden, the sweep does nothing at all. */
+setInterval(() => { if(document.visibilityState === 'visible') look(); }, SWEEP_MS);
 load();
 </script></body></html>
