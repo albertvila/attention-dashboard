@@ -30,12 +30,12 @@ button:hover{background:#30363d}
 .sub{margin:0;color:#8b949e;font-size:12px}
 main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
   grid-template-columns:250px minmax(0,1fr) 262px;gap:26px;align-items:start}
-/* Two rails read beside the board, never in it: specs on the left (browse
-   material — no counts, nothing parkable), ongoing work on the right (live
-   machine state). Browse material drops below the board first, so live work
-   keeps its column; under 1000px everything stacks. */
-@media (max-width:1400px){main{grid-template-columns:minmax(0,1fr) 262px}#specs{order:2;grid-column:1/-1}}
-@media (max-width:1000px){main{grid-template-columns:1fr}#sessions{order:2}#specs{order:3}}
+/* Three columns wherever three fit: specs on the left (browse material — no
+   counts, nothing parkable), the board in the middle, ongoing work on the
+   right (live machine state). Only the stack loses the columns, and there
+   specs reads first rather than after the board — a rail at the foot of a
+   short screen is a rail nobody scrolls to. */
+@media (max-width:1000px){main{grid-template-columns:1fr}#sessions{order:2}#specs{order:-1}}
 #app{min-width:0}
 .rail{position:sticky;top:120px;border:1px solid #30363d;border-radius:8px;padding:12px 14px;background:#0d1117}
 .rail h2{margin:0 0 4px}

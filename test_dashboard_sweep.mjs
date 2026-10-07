@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(here, 'dashboard.html'), 'utf8');
 const page = (() => {
-  const html = readFileSync(join(here, 'dashboard.html'), 'utf8');
   return html.slice(html.lastIndexOf('<script>') + '<script>'.length, html.lastIndexOf('</script>'));
 })();
 
@@ -93,5 +93,13 @@ await p.sweep();
 await tick();
 assert.equal(p.collected.length, afterRefresh, 'a fresh snapshot is not re-collected');
 assert.equal(p.stamped.length, stamps + 1, 'a fresh snapshot records the look');
+
+/* The rails: specs keeps a column of its own wherever three fit — specs left,
+   board middle, live work right — and reads first in the stack, never after the
+   board, where a short screen buries it. */
+const queries = html.slice(html.indexOf('@media'), html.indexOf('#app{min-width:0}'));
+assert.ok(/@media \(max-width:1000px\)\{[\s\S]*?#specs\{order:-1/.test(queries),
+  'the stacked layout reads specs first');
+assert.ok(!/#specs\{order:[1-9]/.test(queries), 'no width drops specs below the board');
 
 console.log('dashboard sweep: all checks passed');
