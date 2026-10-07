@@ -265,14 +265,13 @@ def _utc(iso):
     """Sort key: ISO-8601 in UTC, so string order == time order across Z/+0200."""
     if not iso:
         return ""
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+    return _parsed(iso).astimezone(timezone.utc).isoformat()
 
 
 def humanize_age(iso, now):
     if not iso:
         return ""
-    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    secs = max(0, (now - dt).total_seconds())
+    secs = max(0, (now - _parsed(iso)).total_seconds())
     if secs < 3600:
         return f"{int(secs // 60)}m"
     if secs < 86400:
@@ -653,6 +652,20 @@ def _jira_blockers(row):
     return out
 
 
+def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None):
+    """A Jira row -> the item every Jira card shares. The two callers differ only
+    in what they say about the ticket: its states, its detail line, its facts, and
+    which stamp counts as `updated`."""
+    desc = row.get("description")
+    key = row["key"]
+    return _item(
+        "JIRA", source="jira", ref=key, title=row.get("summary", ""),
+        url=row.get("url") or JIRA_BASE + key,
+        links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)),
+        blocked_by=blocked_by, states=states, detail=detail, facts=facts,
+        times={"updated": _iso(updated or row.get("updated")), "created": _iso(row.get("created"))})
+
+
 def items_from_jira(rows):
     """Jira work items (already fetched) -> normalized items. Title is the summary."""
     items = []
@@ -663,8 +676,6 @@ def items_from_jira(rows):
         if category == "Done" and status_name not in DEPLOY_STATUSES:
             continue
         itype = row.get("issueType") or row.get("issuetype") or {}
-        desc = row.get("description")
-        key = row["key"]
         if status_name in DEPLOY_STATUSES:
             state = "to-deploy"
         elif status_name == SUPPORT_STATUS:
@@ -675,14 +686,10 @@ def items_from_jira(rows):
             state = "not-started"
         tone = "warn" if status_name in DEPLOY_STATUSES else \
                {"Done": "ok", "In Progress": "warn"}.get(category, "waiting")
-        items.append(_item(
-            "JIRA", source="jira", ref=key, title=row.get("summary", ""),
-            url=row.get("url") or JIRA_BASE + key,
-            links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)),
-            blocked_by=_jira_blockers(row),
-            states=[state], detail=itype.get("name", ""),
+        items.append(_jira_item(
+            row, states=[state], detail=itype.get("name", ""),
             facts=[{"label": status_name, "tone": tone}] if status_name else [],
-            times={"updated": _iso(row.get("updated")), "created": _iso(row.get("created"))}))
+            blocked_by=_jira_blockers(row)))
     return items
 
 
@@ -785,18 +792,11 @@ def items_from_jira_closed(rows):
     """Tickets that entered the Done category recently (deploy statuses excluded)."""
     items = []
     for row in rows:
-        status = row.get("status") or {}
-        itype = row.get("issueType") or row.get("issuetype") or {}
-        desc = row.get("description")
-        key = row["key"]
-        items.append(_item(
-            "JIRA", source="jira", ref=key, title=row.get("summary", ""),
-            url=row.get("url") or JIRA_BASE + key,
-            links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)),
-            states=["done"],
-            detail=" · ".join(p for p in (status.get("name", ""), itype.get("name", "")) if p),
-            times={"updated": _iso(row.get("statuscategorychangeddate") or row.get("updated")),
-                   "created": _iso(row.get("created"))}))
+        status = (row.get("status") or {}).get("name", "")
+        itype = ((row.get("issueType") or row.get("issuetype")) or {}).get("name", "")
+        items.append(_jira_item(
+            row, states=["done"], detail=" · ".join(p for p in (status, itype) if p),
+            updated=row.get("statuscategorychangeddate") or row.get("updated")))
     return items
 
 
@@ -883,12 +883,17 @@ def _iso(ts):
     return re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", ts) if ts else ts
 
 
+def _parsed(iso):
+    """ISO-8601 text -> an aware datetime. Accepts `Z` and Jira's `+0200`, so
+    every reader of a stamp goes through one place."""
+    return datetime.fromisoformat(_iso(iso).replace("Z", "+00:00"))
+
+
 def _within_window(ts, now, hours=CLOSED_WINDOW_HOURS):
     """True when ts is inside the last `hours` — date-filtered searches over-fetch."""
     if not ts:
         return False
-    dt = datetime.fromisoformat(_iso(ts).replace("Z", "+00:00"))
-    return (now - dt).total_seconds() <= hours * 3600
+    return (now - _parsed(ts)).total_seconds() <= hours * 3600
 
 
 def _key(row):
@@ -1156,7 +1161,7 @@ def spec_issues(cli=None):
 
 def focus(request, cli=None):
     """Jump to the session a card's link named — the user's own terminal, on the
-    user's own machine. Two commands are reachable and only for an id that looks
+    user's own machine. Three commands are reachable and only for an id that looks
     like one, because this moves the window the reader is looking at: it is a
     POST, never something a page can trigger by being loaded."""
     cli = cli or LIVE
@@ -1165,16 +1170,21 @@ def focus(request, cli=None):
     if not isinstance(target, str) or not FOCUS_TARGET.match(target):
         return {"ok": False, "error": "bad target"}
     if kind == "herdr":
-        command, args = "herdr", ["tab", "focus", target]
+        # `tab focus` switches Herdr's own window to the pane: it raises itself.
+        commands = [("herdr", ["tab", "focus", target])]
     elif kind == "bb":
-        command, args = "bb", ["thread", "open", target]
+        # bb delivers the thread into the app but leaves its window where it was,
+        # so the jump raises it too — otherwise nothing appears to happen.
+        commands = [("bb", ["thread", "open", target]), ("open", ["-a", "bb"])]
     else:
         return {"ok": False, "error": "unknown kind"}
+    ran = [c + " " + " ".join(a) for c, a in commands]
     try:
-        cli.text(command, args)
+        for command, args in commands:
+            cli.text(command, args)
     except Exception as e:
-        return {"ok": False, "ran": command + " " + " ".join(args), "error": str(e)[:200]}
-    return {"ok": True, "ran": command + " " + " ".join(args)}
+        return {"ok": False, "ran": " && ".join(ran), "error": str(e)[:200]}
+    return {"ok": True, "ran": " && ".join(ran)}
 
 
 def _park(key, value, path, data):
