@@ -3,9 +3,10 @@
 
    The producer owns what is true (states, tiers, links, change stamps). This
    owns the layer on top of it: change flags since the reader's last look, ghosts
-   of what left, what the reader parked (snooze / acknowledge), and how the
-   Waiting tier groups by what its cards are. It is dependency-free and
-   side-effect-free; load it as a classic script and use window.AttentionView.
+   of what left, what the reader parked (snooze / acknowledge), how the Waiting
+   tier groups by what its cards are, which of them have a live agent session
+   open on them, and which specs the board already carries. It is dependency-free
+   and side-effect-free; load it as a classic script and use window.AttentionView.
 
    Everything a surface needs to decide *where a card renders* and *what mark it
    carries* lives here, so the surfaces cannot drift apart again. */
@@ -33,8 +34,10 @@
     return m ? m[1] : 'other';
   }
 
-  /** What a group is hiding: the title opening most of its rows share, when
-      they share one — first opening in row order wins a tie. */
+  /** What a group is hiding: the title opening its rows share, counted — or
+      nothing, when they share none. The note is what earns the collapse: a
+      bucket whose rows are one-offs (a Jira project's unrelated tickets, one
+      repo's distinct issues) is plain rows, not a line saying "one off each". */
   function groupNoteOf(rows) {
     const openings = new Map();
     for (const row of rows) {
@@ -42,7 +45,7 @@
       openings.set(opening, (openings.get(opening) || 0) + 1);
     }
     const top = [...openings.entries()].sort((a, b) => b[1] - a[1])[0];
-    return top[1] > 1 ? top[1] + ' \u00d7 ' + top[0] : 'one off each';
+    return top[1] > 1 ? top[1] + ' \u00d7 ' + top[0] : '';
   }
 
   /** The Waiting tier as groups: every row says which group it landed in, the
@@ -71,8 +74,18 @@
     const acks = opts.acks || {};
     const now = opts.now || new Date().toISOString();
     const since = seenAt || (data.changes || {}).previousAt || null;
-    const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || []);
+    const sessions = opts.sessions || {};
+    const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || [])
+      .map(withSessions);
     const gone = (data.changes || {}).gone || [];
+
+    /** The repo a card is about, and the only thing a session can join on: a
+        Jira card carries none, so nothing joins to it. Copy, never mutate — the
+        snapshot is handed to every surface as it arrived. */
+    function withSessions(row) {
+      const live = sessions[row.container || ''];
+      return live && live.length ? Object.assign({}, row, {sessions: live}) : row;
+    }
 
     const isMail = row => row.chip === 'MAIL';
     // A Jira card in Support Investigating is waiting in the snapshot, and
@@ -89,16 +102,24 @@
         (its own fold) nor parked. */
     const work = row => !isMail(row) && !isSupport(row) && !parked(row);
 
+    // Every key a surface draws live, children included: a parent that vanished
+    // while its children survived is the same work twice.
+    const liveKeys = new Set(rows.concat(...rows.map(r => r.children || [])).map(r => r.key));
+    const allKidsLive = r => (r.children || []).length > 0
+      && (r.children || []).every(c => liveKeys.has(c.key));
+
     function ghosts(section) {
       // The Needs queue is for things you can act on; a struck-through card
-      // there reads as "do I still owe this?".
+      // there reads as "do I still owe this?". And a ghost whose every linked
+      // child is still live duplicates them: the live card already names what
+      // the parent was, so striking it again is noise.
       if (section === 'needs') return [];
       return gone.filter(r => r.section === section && !isMail(r) && !isSupport(r)
-        && !parked(r) && since && r.goneAt > since);
+        && !parked(r) && since && r.goneAt > since && !allKidsLive(r));
     }
 
     const tiers = (data.tiers || []).map(t => {
-      const list = t.items.filter(work).concat(ghosts(t.key));
+      const list = t.items.filter(work).concat(ghosts(t.key)).map(withSessions);
       // Waiting is where the noise piles up, so the rules hand it back grouped
       // rather than let a surface invent the groups. The rows are the same rows
       // in the same order; the other tiers carry no groups at all.
@@ -121,6 +142,10 @@
       drafts: (data.drafts || []).filter(work).concat(ghosts('drafts')),
       closed: (data.closed || []).filter(work).concat(ghosts('closed')),
     };
+
+    /** The specs a surface renders: the same issues, each marked when the board
+        already carries it — a spec you are looking at is not a suggestion. */
+    const specs = (opts.specs || []).map(s => Object.assign({}, s, {onBoard: liveKeys.has(s.ref)}));
 
     /** Fold summaries are built from the ages the producer already put on the
         rows — never a second calculation. No updated time, no oldest clause. */
@@ -185,10 +210,9 @@
     const changeClass = f => !f ? '' : ' chg-' + changeTone(f);
 
     return {
-      snoozeOf, ackOf, parked,
+      snoozeOf, ackOf, parked, specs,
       flag: row => flagOf(row, since),
-      tiers, folds, notes, nextCard, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,
-      /** The five choices one control offers: hours, or "ack" (until it changes). */
+      tiers, folds, notes, nextCard, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
         { value: '24', label: '1 day' },

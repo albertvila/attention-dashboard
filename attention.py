@@ -110,9 +110,12 @@ SUPPORT_STATUS = "Support Investigating"
 JIRA_JQL = ("assignee = currentUser() AND (statusCategory != Done OR "
             + " OR ".join(f'status = "{s}"' for s in DEPLOY_STATUSES)
             + ") ORDER BY updated DESC")
-JIRA_FIELDS = "summary,status,issuetype,description,updated,created,project,assignee"
+JIRA_FIELDS = ("summary,status,issuetype,description,updated,created,project,assignee,issuelinks")
 # statuscategorychangeddate = when the ticket entered the Done category.
 JIRA_CLOSED_FIELDS = JIRA_FIELDS + ",statuscategorychangeddate"
+# The inward text of the link type that holds a ticket up: the linked issue is
+# the blocker, and Jira hands back its status and summary with the link itself.
+JIRA_BLOCKED_BY = "is blocked by"
 CLOSED_WINDOW_HOURS = 24
 # Mail: the star is the gate — every starred thread shows up, archived ones
 # included, and un-starring is how it leaves. A `group/<name>` label on several
@@ -201,6 +204,7 @@ def _row(item, now):
         "author": item.get("author", ""),
         "jira": item.get("jira", ""),
         "links": item.get("links") or [],   # what clustered this card; empty = on its own
+        "blocked_by": item.get("blocked_by") or [],   # what holds it up, in its own line
         "jira_issue": item.get("jira_issue"),
         "container": item.get("container", ""),
         "labels": item.get("labels") or [],
@@ -445,7 +449,8 @@ def payload(view, previous=None, now=None):
 # --- adapters: recorded gh JSON -> normalized items -------------------------
 
 def _item(chip, *, source="github", key="", container="", ref="", title="", url="", author="",
-          jira="", links=None, states=(), detail="", facts=(), labels=(), times=None, draft=False):
+          jira="", links=None, blocked_by=(), states=(), detail="", facts=(), labels=(), times=None,
+          draft=False):
     """The one item shape every adapter emits, and only what its source has.
     Tier, label and tone come later from `states` — never here."""
     item = {
@@ -458,6 +463,7 @@ def _item(chip, *, source="github", key="", container="", ref="", title="", url=
         "author": author,
         "jira": jira,
         "links": list(links or []),
+        "blocked_by": list(blocked_by or []),
         "states": list(states),
         "detail": detail,
         "facts": list(facts or []),
@@ -622,6 +628,31 @@ def _issue_item(view, states, open_prs, link):
                  times={"updated": view.get("updatedAt"), "created": view.get("createdAt")})
 
 
+def _jira_blockers(row):
+    """The tickets this one is blocked by, as the card shows them: key, its own
+    status, type and summary. All of it arrives with the link, so naming a
+    blocker costs no second call."""
+    out = []
+    for link in row.get("issuelinks") or []:
+        if JIRA_BLOCKED_BY not in ((link.get("type") or {}).get("inward") or "").lower():
+            continue
+        issue = link.get("inwardIssue") or {}
+        key = issue.get("key")
+        if not key:
+            continue
+        fields = issue.get("fields") or {}
+        status = fields.get("status") or {}
+        out.append({
+            "key": key,
+            "url": JIRA_BASE + key,
+            "status": status.get("name", ""),
+            "status_category": (status.get("statusCategory") or {}).get("name", ""),
+            "type": (fields.get("issuetype") or {}).get("name", ""),
+            "summary": fields.get("summary", ""),
+        })
+    return out
+
+
 def items_from_jira(rows):
     """Jira work items (already fetched) -> normalized items. Title is the summary."""
     items = []
@@ -648,6 +679,7 @@ def items_from_jira(rows):
             "JIRA", source="jira", ref=key, title=row.get("summary", ""),
             url=row.get("url") or JIRA_BASE + key,
             links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)),
+            blocked_by=_jira_blockers(row),
             states=[state], detail=itype.get("name", ""),
             facts=[{"label": status_name, "tone": tone}] if status_name else [],
             times={"updated": _iso(row.get("updated")), "created": _iso(row.get("created"))}))
@@ -1030,6 +1062,121 @@ def load_acks(path=None):
     return {k: v for k, v in _read_json(path or ack_path()).items() if isinstance(v, str)}
 
 
+# --- sessions and specs: read beside the snapshot, not in it -------------------
+# A session is machine state that changes minute to minute and a spec is a
+# backlog nobody is waiting on — neither is true of "now" the way a snapshot is,
+# and the snapshot is written on the hour. Both are read per request instead, the
+# way parking is: the surface asks, the server answers, nothing is stored.
+
+# A pane sitting inside a bb environment belongs to that thread: the path is the
+# only join bb and herdr have between them.
+BB_ENV = re.compile(r"\.bb/plugins/[^/]+/host-data/(?:worktrees|workspaces)/(thr_[a-z0-9]+)")
+# What a focus request may name: a herdr tab, or a bb thread.
+FOCUS_TARGET = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
+
+
+def _slug_for(path, cli):
+    """A checkout -> the container slug the snapshot uses, read from its own
+    remote so the join needs no name guessing; the directory name is the
+    fallback for a checkout with no origin."""
+    try:
+        url = cli.text("git", ["-C", path, "remote", "get-url", "origin"]).strip()
+    except CliError:
+        url = ""
+    slug = url.split("github.com", 1)[-1].lstrip(":/").removesuffix(".git") if url else ""
+    return slug if "/" in slug else os.path.basename(path.rstrip("/"))
+
+
+def live_sessions(cli=None):
+    """Every agent session open right now, per repo, for a surface to join to its
+    cards: herdr panes (including a bare shell sitting in a bb worktree, which
+    herdr reports no agent for) and active bb threads. Each one says where it can
+    be opened — a herdr tab, a bb thread, or both when the pane is inside bb."""
+    cli = cli or LIVE
+    repos, slugs, errors = {}, {}, []
+
+    def add(slug, agent, state, label, busy, origin, herdr=None, bb=None, pane=""):
+        if slug:
+            repos.setdefault(slug, []).append(
+                {"agent": agent, "state": state, "label": label, "busy": busy,
+                 "origin": origin, "pane": pane, "herdr": herdr, "bb": bb})
+
+    try:
+        for pane in cli.json("herdr", ["pane", "list"])["result"]["panes"]:
+            path = pane.get("foreground_cwd") or pane.get("cwd") or ""
+            thread = BB_ENV.search(path)
+            if not pane.get("agent") and not thread:
+                continue                      # a plain shell is not a session
+            if path not in slugs:
+                slugs[path] = _slug_for(path, cli)
+            agent = pane.get("agent") or "bb"
+            state = pane.get("agent_status", "unknown") if pane.get("agent") else "shell"
+            add(slugs[path], agent, state, pane.get("terminal_title_stripped", ""),
+                state in ("working", "blocked"), "bb" if thread else "herdr",
+                herdr={"tab": pane.get("tab_id", ""), "workspace": pane.get("workspace_id", "")},
+                bb={"thread": thread.group(1)} if thread else None,
+                pane=pane.get("pane_id", ""))
+    except Exception as e:
+        errors.append(_error("herdr sessions", e))
+
+    try:
+        projects = {p["id"]: p for p in cli.json("bb", ["project", "list", "--json"])}
+        for thread in cli.json("bb", ["thread", "list", "--json"]):
+            if thread.get("status") != "active":
+                continue                      # hundreds of threads; idle is finished
+            project = projects.get(thread.get("projectId")) or {}
+            path = (project.get("sources") or [{}])[0].get("path", "")
+            add(_slug_for(path, cli) if path else "", thread.get("providerId") or "bb", "active",
+                thread.get("title") or thread["id"], True, "bb", bb={"thread": thread["id"]})
+    except Exception as e:
+        errors.append(_error("bb sessions", e))
+
+    return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "repos": repos, "errors": errors}
+
+
+def spec_issues(cli=None):
+    """The proposals I wrote and labelled `spec` that nobody has taken: open and
+    **unassigned**. An assignee means someone is already working on it, so it is
+    not groundwork any more — and that someone is usually me, which is exactly why
+    those tickets are already on the board."""
+    cli = cli or LIVE
+    try:
+        found = cli.json("gh", ["search", "issues", "--author=@me", "--label=spec",
+                                 "--state=open", "--limit", "40", "--json",
+                                 "number,title,repository,url,updatedAt,assignees"])
+    except Exception as e:
+        return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "issues": [],
+                "errors": [_error("spec issues", e)]}
+    issues = [{"repo": i["repository"]["nameWithOwner"], "number": i["number"],
+               "ref": f'{i["repository"]["nameWithOwner"]}#{i["number"]}',
+               "title": i["title"], "url": i["url"], "updated": _iso(i["updatedAt"])}
+              for i in found if not i.get("assignees")]
+    return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "issues": issues, "errors": []}
+
+
+def focus(request, cli=None):
+    """Jump to the session a card's link named — the user's own terminal, on the
+    user's own machine. Two commands are reachable and only for an id that looks
+    like one, because this moves the window the reader is looking at: it is a
+    POST, never something a page can trigger by being loaded."""
+    cli = cli or LIVE
+    request = request or {}
+    target, kind = request.get("target"), request.get("kind")
+    if not isinstance(target, str) or not FOCUS_TARGET.match(target):
+        return {"ok": False, "error": "bad target"}
+    if kind == "herdr":
+        command, args = "herdr", ["tab", "focus", target]
+    elif kind == "bb":
+        command, args = "bb", ["thread", "open", target]
+    else:
+        return {"ok": False, "error": "unknown kind"}
+    try:
+        cli.text(command, args)
+    except Exception as e:
+        return {"ok": False, "ran": command + " " + " ".join(args), "error": str(e)[:200]}
+    return {"ok": True, "ran": command + " " + " ".join(args)}
+
+
 def _park(key, value, path, data):
     """Set one card's stamp, or clear it when falsy, then persist."""
     key = (key or "").strip()
@@ -1237,6 +1384,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(load_snoozes())
         elif path == "/acks":
             self.send_json(load_acks())
+        elif path == "/sessions":
+            self.send_json(live_sessions())
+        elif path == "/specs":
+            self.send_json(spec_issues())
         elif path == "/status":
             self.send_json(status())
         elif path == "/attention-view.js":
@@ -1254,6 +1405,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(refresh())
         elif path in ("/snoozes", "/acks"):
             self.send_json(snooze(self.read_body()) if path == "/snoozes" else ack(self.read_body()))
+        elif path == "/focus":
+            self.send_json(focus(self.read_body()))
         else:
             self.send_error(405)
 

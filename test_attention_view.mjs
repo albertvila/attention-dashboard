@@ -78,6 +78,20 @@ assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1', 'G2']);  // wait
 assert.equal(view.tiers[2].rows[1].change.kind, 'gone');
 assert.equal(view.counts().gone, 3);                                // but the header still counts all three
 
+// a parent that went while its child stayed live: the live card already names
+// the parent, so the struck copy does not render — but it still counts
+const kidKilled = row({ key: 'K1' });
+const parentGhost = row({ key: 'G4', section: 'waiting', goneAt: '2026-10-02T11:30:00.000Z',
+                          change: { kind: 'gone' }, children: [kidKilled] });
+const halfGhost = row({ key: 'G5', section: 'waiting', goneAt: '2026-10-02T11:30:00.000Z',
+                        change: { kind: 'gone' }, children: [kidKilled, row({ key: 'K2' })] });
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
+                              { key: 'waiting', title: 'w', items: [kidKilled] }],
+                  changes: { previousAt: '2026-10-02T11:00:00.000Z', summary: {}, items: {},
+                             gone: [parentGhost, halfGhost] } }), { now: NOW });
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['K1', 'G5']);  // G5 still has a child only it holds
+assert.equal(view.counts().gone, 2);
+
 // --- mail and parking -------------------------------------------------------
 const mail = row({ chip: 'MAIL', key: 'mail/1', section: 'needs' });
 view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [mail] }, { key: 'ready', title: 'r', items: [] },
@@ -221,7 +235,8 @@ view = overlay(wData([row({ key: 'O1', ref: '', container: '' })]), { now: NOW }
 assert.equal(view.tiers[2].groups[0].key, 'other');
 assert.deepEqual(view.tiers[2].groups[0].rows.map(r => r.key), ['O1']);
 
-// a group names the opening its rows share; a card alone in its group says so
+// a group names the opening its rows share, counted; rows that share none say
+// nothing, which is how a surface knows not to collapse them
 const job = (over = {}) => row({ container: 'Launchmetrics/BIT-databricks',
   title: '[DATABRICKS] Job Failed : one', ...over });
 const twins = wData([job({ key: 'D1', ref: 'BIT-databricks#1', title: '[DATABRICKS] Job Failed : one' }),
@@ -231,7 +246,22 @@ const twins = wData([job({ key: 'D1', ref: 'BIT-databricks#1', title: '[DATABRIC
 view = overlay(twins, { now: NOW });
 assert.deepEqual(view.tiers[2].groups.map(g => [g.key, g.rows.length, g.note]),
   [['BIT-databricks', 3, '3 × [DATABRICKS] Job Failed'],    // the opening they share, counted
-   ['FIRE', 1, 'one off each']]);                           // a lone card is its own group of one
+   ['FIRE', 1, '']]);                                       // a lone card is its own group of one
+// one-offs share no opening, so they carry no note however they were bucketed:
+// a Jira project's unrelated tickets, or one repo's distinct issues
+view = overlay(wData([row({ key: 'F1', ref: 'FIRE-83399', title: 'AWS Health Event - LAMBDA' }),
+                      row({ key: 'F2', ref: 'FIRE-96795', title: 'PLS - Lambda Error Rate High' }),
+                      row({ key: 'F3', ref: 'FIRE-96736', title: '[DATABRICKS] Job Failed : bit-dataUnification' })]),
+               { now: NOW });
+assert.deepEqual(view.tiers[2].groups.map(g => [g.key, g.rows.length, g.note]),
+  [['FIRE', 3, '']]);
+assert.deepEqual(groupRows(view).map(r => r.key), ['F1', 'F2', 'F3']);   // still the partition: nothing hidden
+// one repo, distinct issues: same rule, no opening shared, so no note
+view = overlay(wData([job({ key: 'D1', ref: 'BIT-databricks#1', title: '[DATABRICKS] Job Failed : one' }),
+                      job({ key: 'D2', ref: 'BIT-databricks#2', title: 'Update cluster policy' })]),
+               { now: NOW });
+assert.deepEqual(view.tiers[2].groups.map(g => [g.key, g.rows.length, g.note]),
+  [['BIT-databricks', 2, '']]);
 // nothing lost, nothing duplicated: the groups are the tier's rows, once each
 assert.deepEqual(groupRows(view).map(r => r.key), view.tiers[2].rows.map(r => r.key));
 assert.equal(new Set(groupRows(view).map(r => r.key)).size, groupRows(view).length);
@@ -265,6 +295,32 @@ assert.equal(new Set(flat).size, flat.length);                         // once e
 // only Waiting groups: the other tiers are plain lists
 assert.equal('groups' in view.tiers[0], false);
 assert.equal('groups' in view.tiers[1], false);
+
+// --- sessions on a card, specs beside it ------------------------------------
+// Live machine state and a backlog, joined to the board by repository. The
+// snapshot is handed in untouched: a card that has no session stays the very row
+// the producer wrote.
+const liveSessions = { 'Launchmetrics/LM-shared': [
+  {agent:'pi', state:'working', busy:true, origin:'herdr', label:'\u03c0 - LM-shared',
+   pane:'wN:p1', herdr:{tab:'wN:t1', workspace:'wN'}, bb:null},
+  {agent:'pi', state:'idle', busy:false, origin:'bb', label:'\u03c0 - worktree',
+   pane:'w4:p3', herdr:{tab:'w4:t3', workspace:'w4'}, bb:{thread:'thr_sa8ywf5fsx'}}]};
+const sessData = data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
+  { key: 'waiting', title: 'w', items: [row({ key: 'Launchmetrics/LM-shared#412', ref: 'LM-shared#412',
+                                                container: 'Launchmetrics/LM-shared' }),
+                                          row({ key: 'FIRE-1', ref: 'FIRE-1' })] }] });
+view = overlay(sessData, { now: NOW, sessions: liveSessions,
+                           specs: [{ ref: 'Launchmetrics/LM-shared#412' }, { ref: 'Launchmetrics/PLS-rubn#9' }] });
+byKey = Object.fromEntries(view.tiers[2].rows.map(r => [r.key, r]));
+assert.equal(byKey['Launchmetrics/LM-shared#412'].sessions.length, 2);   // both readings survive
+assert.equal(byKey['FIRE-1'].sessions, undefined);        // a Jira card names no repo: nothing joins
+assert.equal('sessions' in sessData.tiers[2].items[0], false);           // the snapshot is not written to
+assert.deepEqual(view.specs.map(s => [s.ref, s.onBoard]),
+  [['Launchmetrics/LM-shared#412', true], ['Launchmetrics/PLS-rubn#9', false]]);
+// with nothing read, no card grows a column and every spec reads as a suggestion
+view = overlay(data(), { now: NOW });
+assert.deepEqual(view.specs, []);
+assert.equal(view.tiers[2].rows.some(r => r.sessions), false);
 
 // --- fold summaries: what a collapsed fold is hiding ------------------------
 const mailRow = (over = {}) => row({ chip: 'MAIL', key: 'mail/' + (over.id || '1'), ref: '',
