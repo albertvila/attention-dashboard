@@ -258,10 +258,13 @@ dropped   goneAt > myLastLook          (ghost row; kept 7 days / 100 entries, an
                                        tier only shows things you can act on)
 ```
 
-Recently closed is exempt from `new` on purpose: a card that closes while you
-are away is first seen in that window, but it closed — it is not a new card. Its
-`firstSeenAt` is the closure time, so its freshness is still readable. A card
-that leaves a tier for that section still reports `moved` (`in progress → merged`).
+Work that has closed is exempt from `new` wherever it rides: a card that closed
+while you were away is first seen in Recently closed, and a merged PR that stays
+as a member of a live card is first seen in that card — either way it closed, so
+it is not a new card. Its `firstSeenAt` is the closure time, so its freshness is
+still readable, and both render struck — the state badge already says how it
+ended, so finished work never reads as something you just picked up. A card that
+leaves a tier for that section still reports `moved` (`in progress → merged`).
 
 Ghosts are hidden in the Needs queue for the same reason: it is the list of
 things you can act on, and a struck-through row there reads as an open question.

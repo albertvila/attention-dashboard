@@ -156,6 +156,9 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .row.chg-moved.out{border-left-color:#3fb950}
 .row.chg-gone{border-left-color:#6e7681;opacity:.5}
 .row.chg-gone .title a{text-decoration:line-through}
+/* Finished work still riding in a live card, header row or linked child: struck
+   like a ghost, since the state badge already says how it ended. */
+.row.done .title a,.child.done a{text-decoration:line-through}
 .row.draft{border-left-style:dashed;opacity:.72}
 .chg{font-weight:600}
 .chg.new{color:#7ee787}
@@ -462,7 +465,8 @@ function card(it, kind){
   const chg = view.flag(it);
   const gone = !!(chg && chg.kind === 'gone');
   const c = el('div','row ' + kind + view.changeClass(chg)
-                     + (view.parked(it) ? ' snoozed' : '') + (it.draft ? ' draft' : ''));
+                     + (view.parked(it) ? ' snoozed' : '') + (it.draft ? ' draft' : '')
+                     + (view.closed(it) ? ' done' : ''));
   if(it.chip) c.appendChild(el('span','chip '+chipClass(it.chip), it.chip));
   const b = el('div','body');
   const t = el('div','title');
@@ -578,7 +582,7 @@ function kidPill(it){
 /* A linked child is not a card of its own place: it keeps its own chip, ref,
    states, facts, labels, detail and age wherever its parent renders. */
 function child(c){
-  const k = el('div','child');
+  const k = el('div','child' + (view.closed(c) ? ' done' : ''));
   if(c.chip) k.appendChild(el('span','chip mini '+chipClass(c.chip), c.chip));
   const a = document.createElement('a');
   a.href=c.url; a.target='_blank'; a.rel='noreferrer';

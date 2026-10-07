@@ -67,6 +67,18 @@ view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'r
 assert.equal(view.flag(view.folds.closed[0]), null);
 assert.equal(view.counts().new, 0);
 
+// a closed member of a live card: closed wherever it rides, so never new — and
+// the surface carries a predicate to strike it, without knowing the vocabulary
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n',
+                                items: [row({ key: 'P1', firstSeenAt: '2026-10-02T11:30:00.000Z',
+                                              states: [{ key: 'merged', label: 'merged', tier: 'ready', tone: 'good' }] })] },
+                              { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }),
+               { now: NOW });
+assert.equal(view.flag(view.tiers[0].rows[0]), null);
+assert.equal(view.closed(view.tiers[0].rows[0]), true);
+assert.equal(view.closed(row()), false);
+assert.equal(view.counts().new, 0);
+
 // --- ghosts -----------------------------------------------------------------
 const ghost = row({ key: 'G1', section: 'needs', goneAt: '2026-10-02T11:30:00.000Z', change: { kind: 'gone' } });
 const ghostWaiting = row({ key: 'G2', section: 'waiting', goneAt: '2026-10-02T11:30:00.000Z', change: { kind: 'gone' } });
