@@ -4,6 +4,77 @@ One attention queue for GitHub, Jira and starred mail, and one JSON snapshot
 that every surface renders. `attention.py` owns the rules; `dashboard.html` is a
 consumer, not a copy.
 
+## Run it yourself
+
+This is a **local, single-user tool**. Everyone runs their own copy, on their own
+machine, authenticated as themselves: there is no shared server, no deploy, and
+no snapshot anyone else reads. The repo is private — get access first.
+
+Four CLIs, each authenticated as *you*:
+
+| tool | what it answers for | how to get it |
+|---|---|---|
+| `python3` ≥ 3.9 | the producer and the server | usually already there; check `python3 --version` |
+| `gh` | review requests, own PRs, assigned issues, specs | `gh auth login`, scopes `repo` + `read:org` |
+| `twg` | Jira tickets, statuses, blockers | installed and authenticated (`twg auth`) |
+| `gmcli` | starred mail | `npm i -g @mariozechner/gmcli`, then `gmcli accounts credentials <file.json>` once, then `gmcli accounts add <you@launchmetrics.com>` — check with `gmcli accounts list` |
+
+Not one of them is a hard prerequisite. A missing CLI costs its source and
+nothing else: the page opens with `⚠ <source> failed — this queue is partial`
+and the rest of the queue renders anyway.
+
+Then, from this directory:
+
+```bash
+export MAIL_ACCOUNT=you@launchmetrics.com    # once — see Configuration
+python3 attention.py                        # server on http://127.0.0.1:8765
+```
+
+No snapshot exists on the first run, so the first page load cold-starts one
+collection (~20s) before it renders; every read after that is instant and
+file-backed. Nothing else has to be running — the page refreshes itself whenever
+the snapshot it is showing is over an hour old.
+
+### Configuration
+
+Read from the environment at startup:
+
+| variable | default | what it does |
+|---|---|---|
+| `MAIL_ACCOUNT` | `you@launchmetrics.com` | the mailbox `gmcli` searches **and** the address every mail card compares its last sender against |
+| `MAIL_QUERY` | `is:starred -in:trash` | which threads are in the queue — the star is membership, so this is the gate |
+
+**Set `MAIL_ACCOUNT` to the mailbox you added to `gmcli`.** The default is my
+address, and accounts are local to `gmcli`, so leaving it unset fails the mail
+source with `Account 'you@launchmetrics.com' not found` — a partial
+queue, not your mail. It is also the address that decides a card's state: the
+last sender matching it reads `waiting-reply`, anyone else `needs-reply`. Point
+it at a mailbox `gmcli` does not have and you get the error; point it at the
+wrong mailbox and every card reads backwards.
+
+### What needs your machine
+
+Three surfaces want local state rather than a snapshot, and an absent tool costs
+an empty rail, never the queue: **Ongoing work** (`/sessions`) reads herdr panes
+and bb threads open on this machine, **`POST /focus`** moves your own terminal
+window, and **`/reference`** is my workflow and skills page — not part of the
+contract, ignorable if it is not your workflow.
+
+### Known limits
+
+- **A failed source still exits 0.** `python3 attention.py --json …` writes a
+  snapshot and succeeds even when every source errored; the only signal is the
+  `errors` array inside it, so a cron keyed on exit status never notices.
+- **Ceilings:** the 50 most recent starred threads (`MAIL_MAX` in `attention.py`),
+  100 rows per GitHub search, and the 24h / 7-day windows the contract describes.
+  Anything past a ceiling is absent, not error-flagged.
+- **The server is unauthenticated.** It serves and writes on `127.0.0.1` only,
+  and `/focus` moves windows on this machine — do not bind it to a LAN address.
+- **Parking does not travel.** `snoozes.json` and `acks.json` sit beside the
+  snapshot and are gitignored, like `attention.json`: your parking is yours.
+
+## The snapshot file
+
 The snapshot file lives next to this script (`attention.json`) unless a path is
 given: the server reads it, `/refresh` rewrites it, and the page fetches it.
 Plain `attention.py` is enough — the CLI write form is for scripts and crons.
@@ -18,6 +89,9 @@ in-memory copy, so an external writer (the CLI, another collector) is picked up
 instead of being served over.
 
 ## The snapshot contract
+
+Only needed if you are writing a consumer — the dashboard, through
+`attention-view.js`, is the one that exists today.
 
 ```bash
 python3 attention.py --json attention.json   # write + print the delta
@@ -45,8 +119,8 @@ The server adds:
   snapshot
 
 Reads never collect. That is the whole point: the file is the artifact every
-surface consumes, and a refresh is one explicit producer run. If no file exists
-yet, the first read cold-starts with one collection.
+surface consumes, and a refresh is one explicit producer run. One exception —
+with no snapshot file yet, the first read cold-starts a single collection.
 
 Shape (`schema: 1`, bump it when a field's meaning changes):
 
@@ -251,7 +325,8 @@ up with looks: the server collects per request, a cron collects per tick, and
 anything else that collects in between eats the delta.
 
 So rows also carry durable stamps, and each surface remembers its own last-look
-timestamp (`gha.seenAt` in localStorage for the dashboard and the plugin):
+timestamp — the dashboard keeps `gha.seenAt` in localStorage, so it is per
+browser profile:
 
 ```
 new       section != closed and firstSeenAt > myLastLook
@@ -339,7 +414,12 @@ do refresh.
 ## Tests
 
 ```bash
+python3 -m unittest -v test_cli_seam     # the CLI seam, driven by a recorded adapter
 python3 -m unittest -v test_view_model   # fixtures -> view model, contract, diff, parking
 node test_attention_view.mjs             # the shared consumer rules
 node test_dashboard_sweep.mjs            # the visible-tab sweep — and what a hidden tab must not do
 ```
+
+Nothing here touches the network or a live CLI: the seam tests drive a recorded
+adapter in place of `gh`, `twg` and `gmcli`. (`node` for the two `.mjs` suites,
+`python3` for the unittest modules.)
