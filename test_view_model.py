@@ -228,6 +228,40 @@ class JiraSource(unittest.TestCase):
         items = attention.items_from_jira(rows)
         self.assertEqual(items[0]["links"], ["acme/checkout-api#331"])
 
+    def test_blocked_by_links_name_the_holder_with_its_own_status(self):
+        """A card Jira reports as blocked shows the blocker: key, its status and
+        summary, all of it carried by the link. A card that blocks something
+        else, or merely relates to one, is not blocked by it."""
+        rows = [
+            {"key": "FIRE-1", "summary": "held up",
+             "status": {"name": "Waiting for Customer", "statusCategory": {"name": "In Progress"}},
+             "issueType": {"name": "Bug"},
+             "issuelinks": [
+                 {"type": {"name": "Blocking Issue", "inward": "is blocked by", "outward": "blocks"},
+                  "inwardIssue": {"key": "FIDI-275", "fields": {
+                      "summary": "soda checks fail while the enrichment takes 2h",
+                      "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
+                      "issuetype": {"name": "Bug"}}}},
+                 # this card is the blocker here, not the blocked one
+                 {"type": {"name": "Blocking Issue", "inward": "is blocked by", "outward": "blocks"},
+                  "outwardIssue": {"key": "FIRE-999", "fields": {}}},
+                 {"type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+                  "inwardIssue": {"key": "RBT-9", "fields": {}}},
+             ]},
+        ]
+        item = attention.items_from_jira(rows)[0]
+        self.assertEqual(item["blocked_by"], [{
+            "key": "FIDI-275", "url": attention.JIRA_BASE + "FIDI-275",
+            "status": "In Progress", "status_category": "In Progress", "type": "Bug",
+            "summary": "soda checks fail while the enrichment takes 2h"}])
+        # it rides to the row the surface renders
+        row = find(attention.build_view([item], now=NOW), "FIRE-1")
+        self.assertEqual([b["key"] for b in row["blocked_by"]], ["FIDI-275"])
+        # and a card nobody blocks says so with an empty list, never a missing key
+        plain = attention.items_from_jira([{"key": "RBT-2", "summary": "free",
+                                             "status": {}, "issueType": {}}])[0]
+        self.assertEqual(plain["blocked_by"], [])
+
     def test_maps_category_type_url_and_jira_offset(self):
         rows = [
             {"key": "RBT-1", "summary": "s", "url": "https://x/browse/RBT-1",
@@ -643,6 +677,129 @@ class OrderingAndErrors(unittest.TestCase):
         self.assertEqual(attention.humanize_age("2026-09-29T05:00:00Z", NOW), "7h")
         self.assertEqual(attention.humanize_age("2026-09-24T12:00:00Z", NOW), "5d")
         self.assertEqual(attention.humanize_age("2026-07-24T12:00:00Z", NOW), "2mo")
+
+
+class OpenSessions(unittest.TestCase):
+    """Sessions and specs are read per request, never snapshotted: a pane is open
+    now or it is not, and a spec waits for nobody. Both are joined to the board by
+    repository, so what a session says about itself is the whole contract."""
+
+    class Fake:
+        """Only what these two reads touch: herdr panes, bb threads and projects,
+        git remotes, and gh's own issue search."""
+        def __init__(self, panes=(), threads=(), projects=(), remotes=None, issues=None, fail=()):
+            self.panes, self.threads, self.projects = list(panes), list(threads), list(projects)
+            self.remotes, self.issues, self.fail, self.calls = remotes or {}, list(issues or []), set(fail), []
+
+        def json(self, command, args):
+            self.calls.append([command] + list(args))
+            if command in self.fail:
+                raise attention.CliError(command, "boom")
+            if command == "herdr":
+                return {"result": {"panes": self.panes}}
+            if command == "bb":
+                return self.projects if args[0] == "project" else self.threads
+            if command == "gh":
+                return self.issues
+            raise AssertionError(command)
+
+        def text(self, command, args):
+            self.calls.append([command] + list(args))
+            if command in ("herdr", "bb"):      # the focus action itself
+                return ""
+            url = self.remotes.get(args[1], "")
+            if not url:
+                raise attention.CliError(command, "no such remote")
+            return url + "\n"
+
+    def pane(self, **over):
+        pane = {"pane_id": "wN:p1", "tab_id": "wN:t1", "workspace_id": "wN", "cwd": "/w/shared-lib",
+                "agent": "pi", "agent_status": "working", "terminal_title_stripped": "\u03c0 - shared-lib"}
+        pane.update(over)
+        return pane
+
+    def test_a_pane_is_a_session_per_repo_with_its_own_tab(self):
+        cli = self.Fake(panes=[self.pane()],
+                        remotes={"/w/shared-lib": "git@github.com:acme/shared-lib.git"})
+        out = attention.live_sessions(cli=cli)
+        self.assertEqual(list(out["repos"]), ["acme/shared-lib"])
+        session = out["repos"]["acme/shared-lib"][0]
+        self.assertEqual(session["origin"], "herdr")
+        self.assertTrue(session["busy"])
+        self.assertEqual(session["herdr"], {"tab": "wN:t1", "workspace": "wN"})
+        self.assertIsNone(session["bb"])
+        self.assertEqual(out["errors"], [])
+
+    def test_a_pane_inside_a_bb_worktree_opens_both(self):
+        """herdr reports no agent for it, but the path names the thread: the same
+        agent with a different boss, and the card may go to either one."""
+        path = "/Users/a/.bb/plugins/environment-git-worktree/host-data/worktrees/thr_sa8ywf5fsx-1/checkout-api"
+        cli = self.Fake(panes=[self.pane(agent=None, agent_status=None, cwd=path, pane_id="w4:p3",
+                                         tab_id="w4:t3", workspace_id="w4")],
+                        remotes={path: "git@github.com:acme/checkout-api.git"})
+        session = attention.live_sessions(cli=cli)["repos"]["acme/checkout-api"][0]
+        self.assertEqual((session["agent"], session["state"]), ("bb", "shell"))
+        self.assertEqual(session["origin"], "bb")
+        self.assertFalse(session["busy"])
+        self.assertEqual(session["bb"], {"thread": "thr_sa8ywf5fsx"})
+        self.assertEqual(session["herdr"]["tab"], "w4:t3")
+
+    def test_a_plain_shell_and_an_idle_thread_are_not_sessions(self):
+        cli = self.Fake(panes=[self.pane(agent=None, agent_status=None)],
+                        threads=[{"id": "thr_x", "status": "idle", "projectId": "proj_1"}],
+                        projects=[{"id": "proj_1", "sources": [{"path": "/w/shared-lib"}]}],
+                        remotes={"/w/shared-lib": "git@github.com:acme/shared-lib.git"})
+        self.assertEqual(attention.live_sessions(cli=cli)["repos"], {})
+
+    def test_an_active_thread_is_a_session_even_with_no_pane(self):
+        """A bb thread can run on another machine, in a checkout with no herdr
+        pane: the thread record is the only evidence there is."""
+        cli = self.Fake(threads=[{"id": "thr_dxmwv5t789", "status": "active", "providerId": "pi",
+                                  "title": "", "projectId": "proj_1"}],
+                        projects=[{"id": "proj_1", "sources": [{"path": "/w/billing-service"}]}],
+                        remotes={"/w/billing-service": "git@github.com:acme/billing-service.git"})
+        session = attention.live_sessions(cli=cli)["repos"]["acme/billing-service"][0]
+        self.assertEqual((session["origin"], session["state"], session["busy"]), ("bb", "active", True))
+        self.assertEqual(session["bb"], {"thread": "thr_dxmwv5t789"})
+        self.assertIsNone(session["herdr"])
+
+    def test_a_failed_read_is_reported_not_raised(self):
+        out = attention.live_sessions(cli=self.Fake(fail=("herdr",)))
+        self.assertEqual(out["repos"], {})
+        self.assertEqual([e["where"] for e in out["errors"]], ["herdr sessions"])
+
+    def test_specs_are_the_unassigned_issues_i_wrote_with_that_label(self):
+        """An assignee means someone is already on it — usually me, which is why
+        those are already on the board — so a taken spec is not groundwork."""
+        cli = self.Fake(issues=[
+            {"number": 1338, "title": "App releases follow the company CI/CD standard",
+             "url": "https://github.com/acme/billing-service/issues/1338",
+             "updatedAt": "2026-10-06T15:46:30Z", "assignees": [],
+             "repository": {"nameWithOwner": "acme/billing-service"}},
+            {"number": 413, "title": "Read consolidated docs once",
+             "url": "https://github.com/acme/shared-lib/issues/413",
+             "updatedAt": "2026-10-06T15:10:09Z", "assignees": [{"login": "albertvila"}],
+             "repository": {"nameWithOwner": "acme/shared-lib"}}])
+        issues = attention.spec_issues(cli=cli)["issues"]
+        self.assertEqual([i["ref"] for i in issues], ["acme/billing-service#1338"])
+        self.assertEqual(issues[0]["repo"], "acme/billing-service")
+        self.assertEqual(issues[0]["updated"], "2026-10-06T15:46:30Z")
+        self.assertIn("--label=spec", cli.calls[0])
+        self.assertIn("assignees", cli.calls[0][-1])      # the read asks who took it
+        failed = attention.spec_issues(cli=self.Fake(fail=("gh",)))
+        self.assertEqual((failed["issues"], [e["where"] for e in failed["errors"]]), ([], ["spec issues"]))
+
+    def test_focus_runs_only_the_two_commands_and_only_for_an_id(self):
+        cli = self.Fake()
+        self.assertEqual(attention.focus({"kind": "herdr", "target": "wN:t1"}, cli=cli),
+                         {"ok": True, "ran": "herdr tab focus wN:t1"})
+        self.assertEqual(cli.calls[-1], ["herdr", "tab", "focus", "wN:t1"])
+        attention.focus({"kind": "bb", "target": "thr_sa8ywf5fsx"}, cli=cli)
+        self.assertEqual(cli.calls[-1], ["bb", "thread", "open", "thr_sa8ywf5fsx"])
+        for bad in ({"kind": "herdr", "target": "wN:t1; whoami"}, {"kind": "herdr", "target": ""},
+                    {"kind": "shell", "target": "wN:t1"}, {}):
+            self.assertFalse(attention.focus(bad, cli=cli)["ok"], bad)
+        self.assertEqual(len(cli.calls), 2)          # nothing else ever reached the CLI
 
 
 class Snoozes(unittest.TestCase):

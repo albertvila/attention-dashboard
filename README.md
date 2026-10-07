@@ -33,6 +33,12 @@ The server adds:
 - `/refresh` (GET or POST) — runs the producer, rewrites the shared file,
   returns the new snapshot; one run at a time
 - `/snoozes`, `/acks` — the parking files (GET, and POST to change them)
+- `/sessions` — every agent session open right now, per repository: herdr panes
+  and active bb threads, read live so it can never be an hour stale
+- `/specs` — the open issues I wrote with the `spec` label and no assignee: a
+  backlog, not a queue
+- `POST /focus` — open one session on this machine (`{kind: herdr|bb, target}`),
+  the only write that moves a window rather than a file
 - `/status` — this process's producer stamp versus the snapshot's
 - `/attention-view.js` — the shared consumer rules the page loads
 - `/reference` — the workflow and skills reference page; static, renders no
@@ -60,6 +66,7 @@ Every row carries:
 ```
 key           stable identity across snapshots (acme/web-frontend#2040, FIRE-9001)
 links         the keys that clustered this card with others; empty = standalone
+blocked_by    [{key, url, status, status_category, type, summary}] — what Jira says holds this card up; [] when nothing does
 chip          REVIEW | MY PR | ISSUE | JIRA | MAIL | REVIEWED
 title, ref, url, author, container, labels, detail, age
 jira          ticket URL when the branch/item names one; jira_issue = {type,status,status_category,summary}
@@ -119,6 +126,50 @@ rather than the Waiting queue, so a ticket parked with support does not inflate
 the rendered Waiting count. The fold summary names the oldest age. A ticket that
 has not started stays in Needs, and `Waiting for Customer` stays `in-progress` —
 the support status is the only one that folds.
+
+## Blocked by (Jira)
+
+A ticket whose Jira link type says `is blocked by` carries that blocker as
+`blocked_by`, and the card renders it on its own line: the key as a link, the
+blocker's type, its **status** and its summary — so "what am I waiting for" is
+readable without opening Jira, and a blocker that has gone Done reads green
+instead of amber. Jira hands all of it back with the link itself, so naming a
+blocker costs no second call. The other direction (this card *blocks* another)
+is not a block on this card and is not shown.
+
+## Ongoing work and specs (read beside the snapshot)
+
+Two things the board shows are **not** in the snapshot, because neither is true of
+"now" the way a snapshot is: a session is machine state that changes minute to
+minute, and a spec is a backlog nobody is waiting on. Both are read per request,
+the way parking is — the page asks `/sessions` and `/specs`, the server answers,
+nothing is stored, and a failed read costs the columns, never the queue.
+
+**Sessions** come from two sources and say which one they came from. `herdr` is a
+pane herdr itself recognized an agent in — or a pane sitting inside a
+`~/.bb/plugins/<env>/host-data/{worktrees,workspaces}/thr_…` path, which is a bb
+agent with a herdr pane, so it reports `origin: bb` and can be opened either way.
+`bb` is a bb thread, including an `active` one running somewhere with no local
+pane at all. Each session carries `busy` (an agent *working* right now, against a
+pane merely left open), which the column's colour reads, and `herdr` / `bb` — the
+tab to focus and the thread to open.
+
+A session joins a card by **repository**, read from the checkout's own git remote,
+so no name guessing is involved. A Jira card names no repository, so nothing joins
+to it: for `FIRE-*` and friends the column never appears.
+
+**Specs** are the open issues I wrote with the `spec` label and **no assignee**:
+nobody has taken them, so they are groundwork rather than work. An assignee — and
+it is usually me — means someone is already on it, which is exactly why those
+tickets are already on the board. They render in a rail beside the board and never
+in a tier: the queue by definition only carries work someone needs now. One that
+the queue is showing anyway reads `already on the board`, because a spec you are
+looking at is not a suggestion.
+
+`POST /focus` is the one write that moves a window instead of a file: it runs
+`herdr tab focus <tab>` or `bb thread open <thread>`, only for a target matching
+`[A-Za-z0-9:_-]{1,64}`, and it is a POST so that loading a page can never move the
+reader's terminal.
 
 ## Parking a card
 
@@ -212,7 +263,9 @@ that leaves a tier for that section still reports `moved` (`in progress → merg
 
 Ghosts are hidden in the Needs queue for the same reason: it is the list of
 things you can act on, and a struck-through row there reads as an open question.
-The other tiers (and drafts/closed) still ghost in place.
+The other tiers (and drafts/closed) still ghost in place — except when every
+linked child is still live, because then the live card already names what the
+parent was and the struck copy is the same work twice.
 
 First look flags nothing and just records the timestamp. Nothing needs to run on
 a schedule for this to work: whenever the next snapshot arrives, it already
@@ -227,12 +280,17 @@ from `attention-view.js`.
 
 - It opens with the day and the rules' summary sentence — what is new, changed
   and dropped since your last look (`gha.seenAt`) — with the snapshot age and
-  the producer stamp underneath.
+  the producer stamp underneath, and the refresh rule after them: when the page
+  takes focus — opening the tab, switching back to it — a snapshot older than an
+  hour refreshes itself (live collection, ~20s), never on a timer.
 - **Needs you now** renders as generous blocks: title, states, facts, labels and
   the Jira line, then age, links and parking.
-- **Ready when you are** and **Waiting on others** render as one-line rows.
-  Waiting renders the groups the rules hand back: a group of several rows
-  collapses behind `key · N items — note`, and a group of one is a plain row.
+- **Ready when you are** and **Waiting on others** render as compact rows: one
+  line while the name leaves room, otherwise the name takes the width it needs
+  and key, facts, age and parking move to the line below.
+  Waiting renders the groups the rules hand back: rows sharing a title opening
+  collapse behind `key · N items — the opening they share, counted`; rows that
+  share none are plain rows, however they were bucketed.
 - **Starred mail**, **With support**, **Parked**, **Drafts** and **Recently
   closed** are collapsed folds, each showing its count and the description the
   rules give it (`oldest 3d · 2 unread`, `snoozed until a time, or until the
@@ -246,6 +304,16 @@ from `attention-view.js`.
   no facts, just what it was and when it went — in the section it left.
 - An empty **Needs you now** names the next card that could be picked up (the
   rules' next-card line) instead of reading as an empty queue.
+- A card whose repository has an **agent session open on it** gets a column
+  outside the card, beside it: one row per session — green while an agent is
+  working, amber when blocked, grey when the pane is merely open — and each row
+  opens that session (`herdr` focuses the pane's tab, `bb` opens the thread).
+  A card with no session keeps its full width, which is what makes the column
+  itself the signal. Sessions are read from `/sessions` at every look.
+- **Specs** are a left rail: the open issues I wrote with the `spec` label that
+  nobody has taken (no assignee), each linking to GitHub, marked `already on the
+  board` when the queue is already showing it. Browse material beside the board —
+  never a tier, never a count, never parkable.
 - Parking is an explicit control on every card and writes the same `snoozes.json`
   / `acks.json` files as ever; a parked card still counts in the header line.
 
