@@ -112,11 +112,11 @@ smuggles an item in. Each dashboard ends with a "How this queue works" section
 that says the same thing.
 
 A card is a cluster: items that reference each other (issue ↔ PR ↔ Jira key) become
-one card, most urgent member first, the rest as children. **Open and closed items
+one card, most urgent live member first, the rest as children. **Open and closed items
 cluster together**, so a merged PR stays with its ticket instead of splitting into
-the closed log — and because the merged state ranks above waiting, that card moves
-to **Ready when you are** with the ticket shown inline. Only groups whose members
-are all closed go to the closed log.
+the closed log — as a struck child under it, because finished work never names a card
+that still has live work and the card sits in the tier its live member is in. Only
+groups whose members are all closed go to the closed log.
 
 ## With support (Jira)
 

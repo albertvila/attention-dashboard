@@ -168,11 +168,12 @@ def _closed_updated(group):
 
 def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
     """Normalized items -> tiered, ordered view model. No I/O, no gh.
-    Linked items (issue/PR refs, Jira keys) become one card: most urgent
-    member first, the rest as compact children. Open and closed items cluster
-    together, so a merged PR stays with its ticket and lifts the card to the
-    merged state's tier (Ready) instead of splitting into the closed log; a
-    cluster whose members are all closed goes to the closed log."""
+    Linked items (issue/PR refs, Jira keys) become one card: the most urgent
+    member that is still live first, the rest as compact children. Open and
+    closed items cluster together, so a merged PR stays with its ticket — as a
+    struck child, never the header: finished work does not name a card that
+    still has live work, and the card sits in the tier the live member is in.
+    A cluster whose members are all closed goes to the closed log."""
     now = now or datetime.now(timezone.utc)
     closed_items = list(closed or [])
     closed_ids = {id(item) for item in closed_items}   # no marker on the caller's dicts
@@ -181,7 +182,10 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
     closed_rows = []
     for group in _clusters(list(items) + closed_items):
         rows = [_row(item, now) for item in group]
-        rows.sort(key=lambda r: (r["_rank"], r["draft"], r["_updated"]))
+        # Live members first, so a merged PR rides struck under the ticket it
+        # belongs to instead of naming the card from the finished side.
+        rows.sort(key=lambda r: (_row_state(r) in CLOSED_STATES, r["_rank"],
+                                 r["draft"], r["_updated"]))
         # the header's own Jira ticket is already shown inline; don't repeat it.
         jira_key = rows[0]["jira"].rsplit("/", 1)[-1] if rows[0]["jira"] else ""
         kids = [r for r in rows[1:] if r["ref"] != jira_key]
@@ -1031,8 +1035,8 @@ def collect_view(me=None, cli=None):
 
     closed = _collect_closed(cli, me, now, errors)
 
-    # closed items too: a merged PR can become the header of its card, and the
-    # ticket it names is shown inline there rather than as a child.
+    # closed items too: a card that is still live keeps the PR that finished it
+    # as a struck child, and only a cluster that is all closed heads with one.
     _with_jira(items + closed, errors, fetch=partial(_jira_issue, cli))
     return build_view(items, hidden_bots=hidden, errors=errors, now=now, closed=closed)
 

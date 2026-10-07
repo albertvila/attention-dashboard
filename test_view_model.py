@@ -486,8 +486,8 @@ class ClosedLog(unittest.TestCase):
         self.assertEqual(item["links"], ["o/r#2"])
 
     def test_closed_items_cluster_with_their_open_links(self):
-        """A merged PR and the open item it links to stay one card; the merged
-        state ranks above waiting, so the card moves to Ready."""
+        """A merged PR and the open item it links to stay one card; finished
+        work never names it, so the live issue heads the card and it waits."""
         closed = [
             attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
                             times={"updated": "2026-09-29T09:01:00Z"}, links=["o/r#5"]),
@@ -499,8 +499,9 @@ class ClosedLog(unittest.TestCase):
         view = attention.build_view(open_items, now=NOW, closed=closed)
         self.assertEqual(view["closed"], [])
         cards = {t["key"]: t["items"] for t in view["tiers"]}
-        self.assertEqual([r["ref"] for r in cards["ready"]], ["r#5"])
-        self.assertEqual([c["ref"] for c in cards["ready"][0]["children"]], ["r#9", "r#2"])
+        self.assertEqual([r["ref"] for r in cards["waiting"]], ["r#9"])
+        self.assertEqual([c["ref"] for c in cards["waiting"][0]["children"]],
+                         ["r#5", "r#2"])
 
     def test_section_only_move_does_not_repeat_the_tier(self):
         """A card coming back out of the closed log has the same state and tier;
@@ -569,9 +570,10 @@ class ClosedLog(unittest.TestCase):
         self.assertEqual(view["closed"][0]["ref"], "r#5")
         self.assertEqual([c["ref"] for c in view["closed"][0]["children"]], ["r#2"])
 
-    def test_merged_pr_lifts_its_ticket_to_ready(self):
-        """The ticket a merged PR names is shown inline on the card, and the
-        merged PR is the header: the pair does not fall apart into Waiting."""
+    def test_a_live_ticket_heads_the_card_its_merged_pr_helped(self):
+        """Finished work does not name a card that still has live work: the
+        ticket heads it, the merged PR rides struck under it, and the card sits
+        in the ticket's own tier instead of being lifted to Ready by a merge."""
         ticket = attention._item("JIRA", source="jira", ref="FIRE-1", states=["in-progress"],
                                  times={"updated": "2026-09-29T09:00:00Z"})
         merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
@@ -580,10 +582,11 @@ class ClosedLog(unittest.TestCase):
         view = attention.build_view([ticket], now=NOW, closed=[merged])
         cards = [i for t in view["tiers"] for i in t["items"]]
         self.assertEqual(len(cards), 1)
-        self.assertEqual(cards[0]["tier"], "ready")
-        self.assertEqual(cards[0]["ref"], "r#7")
-        self.assertEqual(cards[0]["children"], [])   # the ticket is inline, not a child
-        self.assertEqual(cards[0]["jira"], attention.JIRA_BASE + "FIRE-1")
+        self.assertEqual(cards[0]["tier"], "waiting")
+        self.assertEqual(cards[0]["ref"], "FIRE-1")
+        self.assertEqual([c["ref"] for c in cards[0]["children"]], ["r#7"])
+        self.assertEqual(cards[0]["children"][0]["states"][0]["key"], "merged")
+        self.assertEqual(cards[0]["jira"], "")   # the ticket is the card, not a line under it
         self.assertEqual(view["closed"], [])
 
     def test_closed_bucket_is_newest_first_and_not_in_tiers(self):
@@ -1129,9 +1132,9 @@ class SnapshotContract(unittest.TestCase):
         merged = attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
                                  times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#9"])
         before = attention.payload(attention.build_view([open_item], now=NOW, closed=[merged]), now=NOW)
-        card = before["tiers"][1]["items"][0]                 # merged ranks above waiting
-        self.assertEqual(card["ref"], "r#5")
-        self.assertEqual([c["ref"] for c in card["children"]], ["r#9"])
+        card = before["tiers"][2]["items"][0]                # the live issue names the card
+        self.assertEqual(card["ref"], "r#9")
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#5"])
         after = attention.payload(attention.build_view([open_item], now=NOW, closed=[]), previous=before, now=NOW)
         self.assertEqual([g["section"] for g in after["changes"]["gone"]], ["closed"])
         self.assertEqual(after["changes"]["gone"][0]["ref"], "r#5")
