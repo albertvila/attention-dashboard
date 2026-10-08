@@ -98,7 +98,7 @@ class OwnPRs(unittest.TestCase):
         self.assertEqual([s["key"] for s in row["states"]], ["needs-comments"])
         self.assertTrue(row["detail"].startswith(
             "1 unresolved thread · review-bot: **[NIT]**"), row["detail"])
-        self.assertIn("checkout-api#335", refs(view, "needs"))
+        self.assertIn("checkout-api#331", refs(view, "needs"))
 
     def test_334_ready(self):
         view, _ = build()
@@ -262,6 +262,58 @@ class JiraSource(unittest.TestCase):
                                              "status": {}, "issueType": {}}])[0]
         self.assertEqual(plain["blocked_by"], [])
 
+    def test_a_blocking_link_is_a_dependency_not_a_cluster_link(self):
+        """A blocker stays its own card — it rides in blocked_by — so a blocking
+        link never clusters the two tickets, in either direction."""
+        rows = [{"key": "FIRE-1", "summary": "held up",
+                 "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
+                 "issueType": {},
+                 "issuelinks": [
+                     {"type": {"name": "Blocking Issue", "inward": "is blocked by",
+                               "outward": "blocks"},
+                      "inwardIssue": {"key": "RBT-9", "fields": {}}},
+                     {"type": {"name": "Blocking Issue", "inward": "is blocked by",
+                               "outward": "blocks"},
+                      "outwardIssue": {"key": "RBT-8", "fields": {}}},
+                 ]}]
+        item = attention.items_from_jira(rows)[0]
+        self.assertEqual(item["links"], [])
+        self.assertEqual([b["key"] for b in item["blocked_by"]], ["RBT-9"])
+
+    def test_jira_issue_link_makes_one_card_and_the_fireline_alert_yields(self):
+        """Two tickets Jira links together — Fireline's alert to the ticket that
+        caused it — become one card: the work ticket names it and its state lands
+        it, so the alert's untouched To Do does not drag the card to Needs."""
+        links = {"name": "Problem/Incident", "inward": "is caused by", "outward": "causes"}
+        rows = [
+            {"key": "RBT-9004", "summary": "the work",
+             "status": {"name": "Ready to Test", "statusCategory": {"name": "In Progress"}},
+             "issueType": {"name": "Bug"},
+             "issuelinks": [{"type": links, "outwardIssue": {"key": "FIRE-97142", "fields": {}}}]},
+            {"key": "FIRE-97142", "summary": "the alert",
+             "status": {"name": "To Do", "statusCategory": {"name": "To Do"}},
+             "issueType": {"name": "Bug"},
+             "issuelinks": [{"type": links, "inwardIssue": {"key": "RBT-9004", "fields": {}}}]},
+        ]
+        items = attention.items_from_jira(rows)
+        self.assertEqual(items[0]["links"], ["FIRE-97142"])
+        self.assertEqual(items[1]["links"], ["RBT-9004"])
+        view = attention.build_view(items, now=NOW)
+        self.assertEqual(refs(view, "waiting"), ["RBT-9004"])
+        self.assertEqual(refs(view, "needs"), [])
+        card = find(view, "RBT-9004")
+        self.assertEqual(card["tier"], "waiting")
+        self.assertEqual([c["ref"] for c in card["children"]], ["FIRE-97142"])
+        self.assertEqual(card["children"][0]["states"][0]["key"], "not-started")
+
+    def test_a_fireline_alert_alone_lands_by_its_own_status(self):
+        rows = [{"key": "FIRE-1", "summary": "alert",
+                 "status": {"name": "To Do", "statusCategory": {"name": "To Do"}},
+                 "issueType": {}}]
+        view = attention.build_view(attention.items_from_jira(rows), now=NOW)
+        self.assertEqual(refs(view, "needs"), ["FIRE-1"])
+        self.assertEqual(refs(view, "waiting"), [])
+
     def test_maps_category_type_url_and_jira_offset(self):
         rows = [
             {"key": "RBT-1", "summary": "s", "url": "https://x/browse/RBT-1",
@@ -337,10 +389,10 @@ class JiraSource(unittest.TestCase):
 class Clustering(unittest.TestCase):
     def test_linked_pr_issue_spec_become_one_card(self):
         view, _ = build()
-        header = find(view, "checkout-api#335")
+        header = find(view, "checkout-api#331")
         self.assertEqual(sorted(c["ref"] for c in header["children"]),
-                         ["checkout-api#331", "checkout-api#332"])
-        self.assertIn("checkout-api#335", refs(view, "needs"))
+                         ["checkout-api#332", "checkout-api#335"])
+        self.assertIn("checkout-api#331", refs(view, "needs"))
         self.assertNotIn("checkout-api#331", refs(view, "waiting"))
         self.assertNotIn("checkout-api#332", refs(view, "waiting"))
         self.assertEqual(find(view, "checkout-api#331")["labels"], [{"name": "spec", "color": "7057FF"}])
@@ -403,8 +455,8 @@ class Clustering(unittest.TestCase):
         view = attention.build_view([item, pr], now=NOW)
         cards = [i for t in view["tiers"] for i in t["items"]]
         self.assertEqual(len(cards), 1)
-        self.assertEqual(cards[0]["key"], "acme/web-frontend#2048")
-        self.assertEqual([c["key"] for c in cards[0]["children"]], ["acme/checkout-api#349"])
+        self.assertEqual(cards[0]["key"], "acme/checkout-api#349")
+        self.assertEqual([c["key"] for c in cards[0]["children"]], ["acme/web-frontend#2048"])
 
     def test_draft_cluster_goes_to_drafts_with_children(self):
         items = [
@@ -435,7 +487,8 @@ class Clustering(unittest.TestCase):
             attention._item("JIRA", source="jira", ref="ABC-1", states=["in-progress"]),
         ]
         view = attention.build_view(items, now=NOW)
-        self.assertEqual(find(view, "r#5")["children"], [])
+        self.assertEqual(find(view, "ABC-1")["ref"], "ABC-1")
+        self.assertEqual([c["ref"] for c in find(view, "ABC-1")["children"]], ["r#5"])
 class ClosedLog(unittest.TestCase):
     def test_within_window(self):
         self.assertTrue(attention._within_window("2026-09-29T08:00:00Z", NOW))
@@ -486,8 +539,8 @@ class ClosedLog(unittest.TestCase):
         self.assertEqual(item["links"], ["o/r#2"])
 
     def test_closed_items_cluster_with_their_open_links(self):
-        """A merged PR and the open item it links to stay one card: the live
-        issue heads it, and the merged member still lands the card in Ready."""
+        """A merged PR and the open item it links to stay one card. No spec or
+        ticket label, so the PR names it, and the merge still lands it in Ready."""
         closed = [
             attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
                             times={"updated": "2026-09-29T09:01:00Z"}, links=["o/r#5"]),
@@ -499,9 +552,9 @@ class ClosedLog(unittest.TestCase):
         view = attention.build_view(open_items, now=NOW, closed=closed)
         self.assertEqual(view["closed"], [])
         cards = {t["key"]: t["items"] for t in view["tiers"]}
-        self.assertEqual([r["ref"] for r in cards["ready"]], ["r#9"])
-        self.assertEqual([c["ref"] for c in cards["ready"][0]["children"]],
-                         ["r#5", "r#2"])
+        self.assertEqual([r["ref"] for r in cards["ready"]], ["r#5"])
+        self.assertEqual(sorted(c["ref"] for c in cards["ready"][0]["children"]),
+                         ["r#2", "r#9"])
 
     def test_merged_pr_lifts_its_ticket_to_ready(self):
         """The ticket a merged PR names stays one card with it, and the merged
@@ -668,9 +721,46 @@ class AssignedIssues(unittest.TestCase):
         self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9003")
         jira = attention._item("JIRA", source="jira", ref="RBT-9003", states=["waiting"])
         built = attention.build_view([item, jira], now=NOW)
-        # one card, headed by the issue; the Jira ticket is shown inline, not as child.
-        self.assertEqual([r["ref"] for r in built["tiers"][0]["items"]], ["payments-api#2330"])
-        self.assertEqual(built["tiers"][0]["items"][0]["children"], [])
+        # one card, headed by the Jira ticket; the issue rides under it.
+        self.assertEqual([r["ref"] for r in built["tiers"][0]["items"]], ["RBT-9003"])
+        self.assertEqual([c["ref"] for c in built["tiers"][0]["items"][0]["children"]],
+                         ["payments-api#2330"])
+
+    def test_parent_hash_in_the_body_joins_the_tickets_to_the_spec(self):
+        """`## Parent` / `#1338` is the link GitHub renders. The four tickets
+        and the spec they name are one card, not five."""
+        def issue(num, body):
+            return {"number": num, "title": f"t{num}",
+                    "url": f"https://github.com/acme/billing-service/issues/{num}",
+                    "body": body, "comments": [], "labels": [],
+                    "updatedAt": "2026-10-08T12:00:00Z", "createdAt": "2026-10-08T11:00:00Z"}
+        spec = issue(1338, "## Problem\n\nno children listed\n")
+        tickets = [issue(n, "## Parent\n\n#1338\n") for n in (1339, 1340, 1341, 1342)]
+        items = [attention._issue_item(spec, ["waiting-reply"], [], {})]
+        items += [attention._issue_item(v, ["not-started"], [], {}) for v in tickets]
+        view = attention.build_view(items, now=NOW)
+        cards = [i for t in view["tiers"] for i in t["items"]]
+        self.assertEqual(len(cards), 1)
+        refs = {cards[0]["ref"]} | {c["ref"] for c in cards[0]["children"]}
+        self.assertEqual(refs, {f"billing-service#{n}" for n in range(1338, 1343)})
+
+    def test_header_is_jira_then_spec_then_ticket_then_pr(self):
+        spec = attention._item("ISSUE", container="o/r", ref="r#1", states=["waiting-reply"],
+                               labels=[{"name": "spec"}], links=["RBT-1"])
+        ticket = attention._item("ISSUE", container="o/r", ref="r#2", states=["not-started"],
+                                 labels=[{"name": "ticket"}], links=["o/r#1"])
+        pr = attention._item("MY PR", container="o/r", ref="r#3", states=["ready"],
+                             links=["o/r#2"])
+        jira = attention._item("JIRA", source="jira", ref="RBT-1", states=["in-progress"])
+        view = attention.build_view([pr, ticket, spec, jira], now=NOW)
+        card = [i for t in view["tiers"] for i in t["items"]][0]
+        self.assertEqual(card["ref"], "RBT-1")
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#1", "r#2", "r#3"])
+        # no Jira: the spec names the card, ahead of the ticket and the PR
+        view = attention.build_view([pr, ticket, spec], now=NOW)
+        card = [i for t in view["tiers"] for i in t["items"]][0]
+        self.assertEqual(card["ref"], "r#1")
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#2", "r#3"])
 
     def test_needs_reply_and_not_started(self):
         states, prs = attention.issue_states({"comments": [{"author": {"login": "someone"}}]}, {}, ME)
@@ -1225,9 +1315,9 @@ class SnapshotContract(unittest.TestCase):
         merged = attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
                                  times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#9"])
         before = attention.payload(attention.build_view([open_item], now=NOW, closed=[merged]), now=NOW)
-        card = next(i for t in before["tiers"] for i in t["items"])   # one card, headed by the live issue
-        self.assertEqual(card["ref"], "r#9")
-        self.assertEqual([c["ref"] for c in card["children"]], ["r#5"])
+        card = next(i for t in before["tiers"] for i in t["items"])   # one card; the PR names it
+        self.assertEqual(card["ref"], "r#5")
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#9"])
         after = attention.payload(attention.build_view([open_item], now=NOW, closed=[]), previous=before, now=NOW)
         self.assertEqual([g["section"] for g in after["changes"]["gone"]], ["closed"])
         self.assertEqual(after["changes"]["gone"][0]["ref"], "r#5")

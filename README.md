@@ -203,16 +203,20 @@ smuggles an item in. Each dashboard ends with a "How this queue works" section
 that says the same thing.
 
 A card is a cluster: items that reference each other (issue ↔ PR ↔ Jira key) become
-one card, most urgent live member first, the rest as children. **Open and closed items
-cluster together**, so a merged PR stays with its ticket instead of splitting into
-the closed log — as a struck child under it, because finished work never names a card
-that still has live work. The **header** is the live member; the **tier** is the
-cluster's best state, so a merged PR lifts its own card to **Ready when you are** —
-that merged PR is the evidence that the live member's state is behind reality (a
-ticket still In Review, an issue nobody replied to), and the follow-up it leaves
-(closing the ticket, deploying it) belongs where you can act on it rather than buried
-among everything else waiting. Only groups whose members are all closed go to the
-closed log.
+one card. **Open and closed items cluster together**, so a merged PR stays with its
+ticket instead of splitting into the closed log. The **header** is chosen by kind,
+not by urgency: a Jira ticket if the cluster has one, otherwise a GitHub issue
+labelled `spec`, otherwise one labelled `ticket`, otherwise the PR. Anything else
+only names the card when none of those are present. Within one kind, a live member
+beats a finished one. The **tier** is still the cluster's best state, so a merged PR
+lifts its card to **Ready when you are** even when a waiting ticket is the face.
+Only groups whose members are all closed go to the closed log.
+
+**Two Jira tickets for one incident** cluster through the Jira link itself. When
+one of them is Fireline's alert ticket (the `FIRE-` project), the other names the
+card and its state lands it: the alert's status is the automation's copy, not the
+work's. A `blocks` / `is blocked by` link is a dependency, not sameness — the
+blocker stays its own card and rides in `blocked_by`.
 
 ## With support (Jira)
 
@@ -313,9 +317,10 @@ the snapshot's `links` field.
 | GitHub → Jira | Jira key in a PR **branch name** (`m-feature-…-RBT-723`) | branch |
 | GitHub → Jira | Jira **browse URL** | issue/PR body or comment |
 | Jira → GitHub | GitHub **issue/PR URL** | Jira description |
+| Jira ↔ Jira | Jira **issue link**, either direction; `blocks` / `is blocked by` is a dependency (`blocked_by`), not membership | the Jira link itself |
 | GitHub ↔ GitHub | `Closes owner/repo#123` (cross-repo) or `Fixes #123` | PR body — GitHub then reports it as a closing reference |
 | GitHub ↔ GitHub | GitHub **issue/PR URL** | issue/PR body or comment |
-| GitHub ↔ GitHub | sub-issue / parent, or `#123` in a PR **title** | GitHub UI |
+| GitHub ↔ GitHub | sub-issue / parent, or `#123` in a PR **title** or an issue body | GitHub UI — `#1338` under `## Parent` is the link |
 | Mail | Jira key or GitHub URL in subject/snippet; `group/<name>` label | mail text, Gmail label |
 
 Bare keys in prose are ignored on purpose (`UTF-8`, `SHA-256` match the
@@ -401,10 +406,8 @@ from `attention-view.js`.
 - **Ready when you are** and **Waiting on others** render as compact rows: the
   name and its states claim the first line, so the line under it — change mark,
   author, repository or key, facts, detail — starts at the same edge in every
-  card, with age, links and parking at the row's right.
-  Waiting renders the groups the rules hand back: rows sharing a title opening
-  collapse behind `key · N items — the opening they share, counted`; rows that
-  share none are plain rows, however they were bucketed.
+  card, with age, links and parking at the row's right. Waiting does not
+  collapse rows that share a title.
 - **Starred mail**, **With support**, **Parked**, **Drafts** and **Recently
   closed** are collapsed folds, each showing its count and the description the
   rules give it (`oldest 3d · 2 unread`, `snoozed until a time, or until the

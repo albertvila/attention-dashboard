@@ -28,6 +28,8 @@ button:hover{background:#30363d}
 .date{margin:12px 0 0;color:#8b949e;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
 .sentence{font-size:24px;line-height:1.25;font-weight:400;margin:6px 0 4px;text-transform:none;letter-spacing:normal;color:#e6edf3}
 .sub{margin:0;color:#8b949e;font-size:12px}
+#jumped{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+#jumped button{font-size:11px;padding:1px 8px;color:#d29922;border-color:#d2992255;background:transparent}
 main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
   grid-template-columns:250px minmax(0,1fr) 262px;gap:26px;align-items:start}
 /* Three columns wherever three fit: specs on the left (browse material — no
@@ -113,6 +115,7 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .author,.repo{color:#8b949e;text-decoration:none}
 .author:hover,.repo:hover{color:#e6edf3;text-decoration:underline}
 .avatar{width:16px;height:16px;border-radius:50%;vertical-align:-3px;margin-right:4px;background:#30363d}
+.avatar-link{text-decoration:none;line-height:0}
 .jira{color:#79c0ff;text-decoration:none}
 .jira:hover{text-decoration:underline}
 .jira-line{margin-top:4px;font-size:12px;overflow-wrap:anywhere}
@@ -193,6 +196,7 @@ pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px;color:#c9d1d9;max-height:
   <p id="day" class="date"></p>
   <h1 id="sentence" class="sentence"></h1>
   <p id="stamp" class="sub">loading…</p>
+  <p id="jumped" class="sub"></p>
 </header>
 <main>
   <aside id="specs" class="rail"></aside>
@@ -281,7 +285,27 @@ async function load(isRefresh){
    Waiting as rows (Waiting in the groups the rules hand back), then the folds.
    Every card goes through card(); a layout chooses emphasis and arrangement,
    never which parts of a card exist. */
+/* A refresh rebuilds the page. Without this, the scroll position and every
+   fold you had open are gone, which is what losing your place actually is. */
+function place(){
+  const open = new Set();
+  document.querySelectorAll('details[data-keep][open]').forEach(d => open.add(d.dataset.keep));
+  document.querySelectorAll('.row[data-key] .children').forEach(n => open.add('kids:' + n.closest('.row').dataset.key));
+  return {y: window.scrollY, open};
+}
+function restore(saved){
+  if(!saved) return;
+  document.querySelectorAll('details[data-keep]').forEach(d => { if(saved.open.has(d.dataset.keep)) d.open = true; });
+  document.querySelectorAll('.row[data-key]').forEach(row => {
+    if(saved.open.has('kids:' + row.dataset.key)){
+      const b = row.querySelector('.kidpill');
+      if(b) b.click();
+    }
+  });
+  if(window.scrollTo) window.scrollTo(0, saved.y);
+}
 function render(data){
+  const saved = place();
   app.innerHTML = '';
   const staleText = AttentionView.staleText(data, status);
   if(staleText) app.appendChild(el('div','err', staleText));
@@ -297,24 +321,6 @@ function render(data){
     s.appendChild(el('h2', null, tier.title + ' · ' + tier.count));
     if(!tier.rows.length){
       s.appendChild(el('div','empty', tier.key === 'needs' ? view.nextCard() : 'Nothing here.'));
-    }else if(tier.key === 'waiting' && tier.groups && tier.groups.length){
-      // Waiting renders the groups the rules hand back: several near-identical
-      // cards (a shared title opening, which is the group's note) collapse
-      // behind one line naming them; anything else is plain rows.
-      for(const g of tier.groups){
-        if(g.rows.length === 1 || !g.note){
-          for(const r of g.rows) s.appendChild(card(r, 'line'));
-          continue;
-        }
-        const d = document.createElement('details');
-        d.className = 'group';
-        const sum = document.createElement('summary');
-        sum.appendChild(el('b', null, g.key));
-        sum.appendChild(document.createTextNode(' · ' + g.rows.length + ' items — ' + g.note));
-        d.appendChild(sum);
-        for(const r of g.rows) d.appendChild(card(r, 'line'));
-        s.appendChild(d);
-      }
     }else{
       for(const it of tier.rows) s.appendChild(card(it, tier.key === 'needs' ? 'block' : 'line'));
     }
@@ -331,18 +337,32 @@ function render(data){
   app.appendChild(helpBox([
     'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look, then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
     'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, tickets to deploy — and a card whose merged member finished while its ticket or issue still waits, that finished work struck underneath). Waiting on others: you handed off (PRs awaiting review, tickets in progress). When Needs is empty, its line names the next card that could be picked up.',
-    'Waiting groups — Waiting renders the groups the rules hand back: cards sharing a title opening collapse behind one line, key · N items — the opening they share, counted, expanding in place; cards sharing none are plain rows, whatever they were bucketed by.',
     'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Starred mail fold instead of the tiers. The star is membership and nothing else; the badge follows who sent the last message: waiting reply when that was you, needs reply when it was someone else. Un-star one to clear it; nothing here changes your mail.',
     'Support — a Jira ticket in Support Investigating is waiting on others, and renders in the collapsed With support fold rather than the Waiting queue. Expand the fold to read it.',
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, unread mail, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
-    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up.',
+    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
-    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
+    'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Parking — the picker on each card snoozes it until a time (4 hours / 1 day / 3 days / 1 week) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
   ]));
   paintSpecs();
   paintSessions();
+  const jumped = document.getElementById('jumped');
+  jumped.innerHTML = '';
+  const rows = view.tiers.flatMap(t => t.rows).concat(
+    view.folds.mail, view.folds.support, view.folds.parked, view.folds.drafts, view.folds.closed);
+  for(const r of rows){
+    const f = view.flag(r);
+    if(!f || f.kind !== 'moved') continue;
+    const b = el('button', null, (r.ref || r.title) + ' · ' + view.changeLabel(f));
+    b.onclick = () => {
+      const hit = document.querySelector('[data-key="' + CSS.escape(r.key) + '"]');
+      if(hit) hit.scrollIntoView({block: 'center'});
+    };
+    jumped.appendChild(b);
+  }
+  restore(saved);
 }
 
 /* Every card carries its count and the note the rules give it; a fold the rules
@@ -350,6 +370,7 @@ function render(data){
 function foldBox(title, items, note){
   const d = document.createElement('details');
   d.className = 'fold';
+  d.dataset.keep = 'fold:' + title;
   const s = document.createElement('summary');
   s.appendChild(el('b', null, title));
   s.appendChild(document.createTextNode(' · ' + items.length));
@@ -510,6 +531,7 @@ function card(it, kind){
   const c = el('div','row ' + kind + view.changeClass(chg)
                      + (view.parked(it) ? ' snoozed' : '') + (it.draft ? ' draft' : '')
                      + (view.closed(it) ? ' done' : ''));
+  if(it.key) c.dataset.key = it.key;
   if(it.chip) c.appendChild(el('span','chip '+chipClass(it.chip), it.chip));
   const b = el('div','body');
   const t = el('div','title');
@@ -527,14 +549,25 @@ function card(it, kind){
     m.appendChild(document.createTextNode(' · '));
   }
   if(it.author){
+    const pr = it.chip === 'MY PR' || it.chip === 'REVIEW' || it.chip === 'REVIEWED';
     const img = document.createElement('img');
-    img.className='avatar'; img.loading='lazy'; img.alt=''; img.title='by '+it.author;
+    img.className='avatar'; img.loading='lazy'; img.alt='';
     img.src='https://github.com/'+encodeURIComponent(it.author)+'.png?size=32';
-    m.appendChild(img);
-    const who = document.createElement('a');
-    who.className='author'; who.target='_blank'; who.rel='noreferrer'; who.textContent=it.author;
-    who.href='https://github.com/'+encodeURIComponent(it.author);
-    m.appendChild(who);
+    if(pr){
+      const who = document.createElement('a');
+      who.className='avatar-link'; who.target='_blank'; who.rel='noreferrer';
+      who.href='https://github.com/'+encodeURIComponent(it.author);
+      who.title=it.author;
+      who.appendChild(img);
+      m.appendChild(who);
+    }else{
+      img.title='by '+it.author;
+      m.appendChild(img);
+      const who = document.createElement('a');
+      who.className='author'; who.target='_blank'; who.rel='noreferrer'; who.textContent=it.author;
+      who.href='https://github.com/'+encodeURIComponent(it.author);
+      m.appendChild(who);
+    }
     m.appendChild(document.createTextNode(' · '));
   }
   const refParts = String(it.ref || '').split('#');

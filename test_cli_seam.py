@@ -244,10 +244,11 @@ class CollectionFromARecording(unittest.TestCase):
         self.assertEqual([f["label"] for f in draft["facts"]],
                          ["awaiting review", "checks green", "merge conflicts"])
         self.assertEqual(draft["detail"], "1 unresolved thread · waiting on reviewer")
-        # the issues linked to #335 ride on that card as children, not on their own.
+        # the spec issue names the card; the issue and PR linked to it ride on
+        # that card as children, not on their own.
         self.assertEqual(found["acme/checkout-api#332"][1]["chip"], "ISSUE")
-        self.assertEqual([c["key"] for c in found["acme/checkout-api#335"][1]["children"]],
-                         ["acme/checkout-api#331", "acme/checkout-api#332"])
+        self.assertEqual([c["key"] for c in found["acme/checkout-api#331"][1]["children"]],
+                         ["acme/checkout-api#332", "acme/checkout-api#335"])
 
     def test_jira_enrichment_and_mail_grouping_cross_the_seam(self):
         found = cards(self.collect())

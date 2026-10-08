@@ -124,6 +124,10 @@ JIRA_CLOSED_FIELDS = JIRA_FIELDS + ",statuscategorychangeddate"
 # The inward text of the link type that holds a ticket up: the linked issue is
 # the blocker, and Jira hands back its status and summary with the link itself.
 JIRA_BLOCKED_BY = "is blocked by"
+# Fireline opens an alert ticket in the FIRE project and links it to the ticket
+# that owns the work ("Problem/Incident": the work ticket causes the alert).
+# The alert is the automation's copy of the incident, not the card.
+JIRA_ALERT_PREFIX = "FIRE-"
 # Two horizons, on purpose. A closed row is *shown* in Recently closed for a day,
 # and it is *collected* for as long as a ghost can appear (GONE_WINDOW_HOURS), so a
 # live card keeps its closed members for as long as the memory of them matters —
@@ -171,11 +175,9 @@ def _closed_updated(group):
 
 def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
     """Normalized items -> tiered, ordered view model. No I/O, no gh.
-    Linked items (issue/PR refs, Jira keys) become one card: the most urgent
-    member that is still live first, the rest as compact children. Open and
-    closed items cluster together, so a merged PR stays with its ticket — as a
-    struck child, never the header: finished work does not name a card that
-    still has live work. The cluster's best state still decides the tier, so a
+    Linked items (issue/PR refs, Jira keys) become one card. The header is a
+    Jira ticket if the cluster has one, else a `spec` issue, else a `ticket`
+    issue, else a PR. The cluster's best state still decides the tier, so a
     merged PR lands the card in Ready, where the follow-up is.
     A cluster whose members are all closed goes to the closed log."""
     now = now or datetime.now(timezone.utc)
@@ -186,16 +188,19 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
     closed_rows = []
     for group in _clusters(list(items) + closed_items):
         rows = [_row(item, now) for item in group]
-        # Live members first, so a merged PR rides struck under the ticket it
-        # belongs to instead of naming the card from the finished side.
-        rows.sort(key=lambda r: (_row_state(r) in CLOSED_STATES, r["_rank"],
-                                 r["draft"], r["_updated"]))
+        # Jira, then a spec issue, then a ticket issue, then a PR. Finished
+        # work only names the card when nothing preferred is still live.
+        rows.sort(key=_header_key)
         # The tier is the cluster's best state, not the header's. A merged PR is
         # the evidence that the live member's own state is behind reality — a
         # ticket still In Review, an issue nobody replied to — so the card lands
         # where the finished member points, next to the follow-up (close the
         # ticket, deploy it), instead of buried among everything that waits.
-        lands = min(rows, key=lambda r: r["_rank"])
+        # A Fireline alert is the exception: while the ticket that owns the work
+        # is in the cluster, the alert's status is the automation's copy, not
+        # the work's, so it does not decide where the card lands either.
+        owned = any(r["chip"] == "JIRA" and not r["_alert"] for r in rows)
+        lands = min(rows, key=lambda r: (owned and r["_alert"], r["_rank"]))
         # the header's own Jira ticket is already shown inline; don't repeat it.
         jira_key = rows[0]["jira"].rsplit("/", 1)[-1] if rows[0]["jira"] else ""
         kids = [r for r in rows[1:] if r["ref"] != jira_key]
@@ -215,10 +220,12 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
         for r in rows:
             del r["_updated"]
             del r["_rank"]
+            del r["_alert"]
     closed_rows.sort(key=lambda r: r["_updated"], reverse=True)
     for r in closed_rows:
         del r["_updated"]
         del r["_rank"]
+        del r["_alert"]
     return {
         "tiers": [
             {"key": key, "title": title, "items": buckets[key]} for key, title in TIERS
@@ -255,6 +262,8 @@ def _row(item, now):
         "draft": bool(item.get("draft")),
         "children": [],
         "tier": tier,
+        # Fireline's own alert ticket, for the header/landing preference below.
+        "_alert": item.get("source") == "jira" and str(item.get("ref") or "").startswith(JIRA_ALERT_PREFIX),
         "_updated": _utc(item.get("times", {}).get("updated")),
         "_rank": [t for t, _ in TIERS].index(tier),
     }
@@ -341,6 +350,29 @@ def _row_key(row):
     if container:
         return f'{container}#{str(row.get("ref", "")).rsplit("#", 1)[-1]}'
     return row.get("ref", "")
+
+
+_PR_CHIPS = ("MY PR", "REVIEW", "REVIEWED")
+
+
+def _header_key(row):
+    """Who names the card, most preferred first. A Jira ticket beats a spec
+    issue, which beats a ticket issue, which beats a PR. Within one kind, a
+    live member beats a finished one, then urgency, then age."""
+    chip = row.get("chip") or ""
+    names = {str(l.get("name", "")).lower() for l in (row.get("labels") or [])}
+    if chip == "JIRA":
+        kind = 0
+    elif chip == "ISSUE" and "spec" in names:
+        kind = 1
+    elif chip == "ISSUE" and "ticket" in names:
+        kind = 2
+    elif chip in _PR_CHIPS:
+        kind = 3
+    else:
+        kind = 4
+    return (kind, _row_state(row) in CLOSED_STATES, row["_alert"],
+            row["_rank"], row["draft"], row["_updated"])
 
 
 def _row_state(row):
@@ -661,7 +693,10 @@ def _issue_item(view, states, open_prs, link):
     links = [f"{repo}#{link['parent']['number']}"] if link.get("parent") else []
     for group in ("subIssues", "closedByPullRequestsReferences"):
         links += [f"{repo}#{n['number']}" for n in (link.get(group) or {}).get("nodes", [])]
+    # GitHub renders `#1338` in the body as a link. That is how a spec's tickets
+    # name their parent (`## Parent` / `#1338`) when the parent field was not set.
     links += _github_links_in(_text_of(view))
+    links += _issue_refs_in(_text_of(view), repo)
     return _item("ISSUE", container=repo, ref=_ref(repo, view["number"]), title=view["title"],
                  url=view["url"], links=list(dict.fromkeys(links)), jira=_jira_url_in(_text_of(view)),
                  states=states, detail=" · ".join(parts), labels=_labels(view.get("labels")),
@@ -693,6 +728,24 @@ def _jira_blockers(row):
     return out
 
 
+def _jira_linked_keys(row):
+    """The other tickets a Jira link joins to this one, either direction: a link
+    is how Jira says two tickets are the same work (Fireline's alert to the
+    ticket that caused it). A blocking link is a dependency, not sameness — the
+    blocker stays its own card and rides in this one's blocked_by line."""
+    out = []
+    for link in row.get("issuelinks") or []:
+        kind = link.get("type") or {}
+        if "block" in (kind.get("inward") or "").lower() \
+                or "block" in (kind.get("outward") or "").lower():
+            continue
+        for side in ("inwardIssue", "outwardIssue"):
+            key = (link.get(side) or {}).get("key")
+            if key:
+                out.append(key)
+    return out
+
+
 def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None):
     """A Jira row -> the item every Jira card shares. The two callers differ only
     in what they say about the ticket: its states, its detail line, its facts, and
@@ -702,7 +755,8 @@ def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None)
     return _item(
         "JIRA", source="jira", ref=key, title=row.get("summary", ""),
         url=row.get("url") or JIRA_BASE + key,
-        links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)),
+        links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc))
+              + _jira_linked_keys(row),
         blocked_by=blocked_by, states=states, detail=detail, facts=facts,
         times={"updated": _iso(updated or row.get("updated")), "created": _iso(row.get("created"))})
 
@@ -823,8 +877,9 @@ def _closed_issue_item(node):
     links = _graphql_links([node["parent"]] if node.get("parent") else [])
     for group in ("subIssues", "closedByPullRequestsReferences"):
         links += _graphql_links((node.get(group) or {}).get("nodes"))
+    links += _issue_refs_in(node.get("body"), repo)
     return _item("ISSUE", container=repo, ref=_ref(repo, node["number"]), title=node["title"],
-                 url=node["url"], links=links, jira=_jira_url_in(node.get("body")),
+                 url=node["url"], links=list(dict.fromkeys(links)), jira=_jira_url_in(node.get("body")),
                  labels=_labels((node.get("labels") or {}).get("nodes")), states=["closed"],
                  times={"updated": node.get("closedAt"), "created": node.get("createdAt")})
 
@@ -1612,6 +1667,11 @@ def refresh():
     One at a time: concurrent clicks share nothing but the lock."""
     global LAST_PAYLOAD, LAST_MTIME
     with REFRESH_LOCK:
+        # A fresh process has nothing in memory. Diff against the file, or the
+        # first refresh after a restart marks every card new and the history
+        # of where things were is gone.
+        if LAST_PAYLOAD is None:
+            LAST_PAYLOAD = load_previous(default_snapshot_path())
         LAST_PAYLOAD = collect_payload(LAST_PAYLOAD)
         path = default_snapshot_path()
         write_snapshot(LAST_PAYLOAD, path)

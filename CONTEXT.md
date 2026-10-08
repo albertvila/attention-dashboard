@@ -27,6 +27,12 @@ _Avoid_: group, thread
 How a cluster renders: one header, the rest as children.
 _Avoid_: ticket, task, entry
 
+**Alert ticket**:
+The Fireline-opened `FIRE-` ticket Jira links to the ticket that caused an
+incident. It rides as a child: the work ticket names the card and its state lands
+it, never the alert's.
+_Avoid_: incident
+
 **Row**:
 The snapshot's record of a card — the contract's unit, what a surface is handed
 before styling.
@@ -40,7 +46,8 @@ _Avoid_: status (that is Jira's own field name, not our vocabulary)
 **Tier**:
 The urgency class a card lands in: needs, ready, waiting. A card takes the best
 state in its cluster, so a merged member lifts a card whose live work waits; the
-row's own `tier` is its header's, and `section` is where it renders.
+row's own `tier` is its header's, and `section` is where it renders. An Alert
+ticket never decides it.
 _Avoid_: bucket, priority, lane
 
 **Section**:
