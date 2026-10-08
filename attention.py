@@ -175,7 +175,8 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
     member that is still live first, the rest as compact children. Open and
     closed items cluster together, so a merged PR stays with its ticket — as a
     struck child, never the header: finished work does not name a card that
-    still has live work, and the card sits in the tier the live member is in.
+    still has live work. The cluster's best state still decides the tier, so a
+    merged PR lands the card in Ready, where the follow-up is.
     A cluster whose members are all closed goes to the closed log."""
     now = now or datetime.now(timezone.utc)
     closed_items = list(closed or [])
@@ -189,6 +190,12 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
         # belongs to instead of naming the card from the finished side.
         rows.sort(key=lambda r: (_row_state(r) in CLOSED_STATES, r["_rank"],
                                  r["draft"], r["_updated"]))
+        # The tier is the cluster's best state, not the header's. A merged PR is
+        # the evidence that the live member's own state is behind reality — a
+        # ticket still In Review, an issue nobody replied to — so the card lands
+        # where the finished member points, next to the follow-up (close the
+        # ticket, deploy it), instead of buried among everything that waits.
+        lands = min(rows, key=lambda r: r["_rank"])
         # the header's own Jira ticket is already shown inline; don't repeat it.
         jira_key = rows[0]["jira"].rsplit("/", 1)[-1] if rows[0]["jira"] else ""
         kids = [r for r in rows[1:] if r["ref"] != jira_key]
@@ -201,7 +208,7 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
                 closed_rows.append(rows[0])
         else:
             # drafts are tests/POCs: out of the attention tiers, into their own section.
-            (drafts if rows[0]["draft"] else buckets[rows[0]["tier"]]).append(rows[0])
+            (drafts if rows[0]["draft"] else buckets[lands["tier"]]).append(rows[0])
     for rows in list(buckets.values()) + [drafts]:
         # stalest activity first.
         rows.sort(key=lambda r: r["_updated"])

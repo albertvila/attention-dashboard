@@ -486,8 +486,8 @@ class ClosedLog(unittest.TestCase):
         self.assertEqual(item["links"], ["o/r#2"])
 
     def test_closed_items_cluster_with_their_open_links(self):
-        """A merged PR and the open item it links to stay one card; finished
-        work never names it, so the live issue heads the card and it waits."""
+        """A merged PR and the open item it links to stay one card: the live
+        issue heads it, and the merged member still lands the card in Ready."""
         closed = [
             attention._item("ISSUE", container="o/r", ref="r#2", states=["closed"],
                             times={"updated": "2026-09-29T09:01:00Z"}, links=["o/r#5"]),
@@ -499,9 +499,29 @@ class ClosedLog(unittest.TestCase):
         view = attention.build_view(open_items, now=NOW, closed=closed)
         self.assertEqual(view["closed"], [])
         cards = {t["key"]: t["items"] for t in view["tiers"]}
-        self.assertEqual([r["ref"] for r in cards["waiting"]], ["r#9"])
-        self.assertEqual([c["ref"] for c in cards["waiting"][0]["children"]],
+        self.assertEqual([r["ref"] for r in cards["ready"]], ["r#9"])
+        self.assertEqual([c["ref"] for c in cards["ready"][0]["children"]],
                          ["r#5", "r#2"])
+
+    def test_merged_pr_lifts_its_ticket_to_ready(self):
+        """The ticket a merged PR names stays one card with it, and the merged
+        PR is what lands it in Ready — where the follow-up is: close the ticket,
+        deploy it. The ticket still heads the card, because finished work never
+        names live work, so it rides struck underneath instead."""
+        ticket = attention._item("JIRA", source="jira", ref="FIRE-1", states=["in-progress"],
+                                 times={"updated": "2026-09-29T09:00:00Z"})
+        merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
+                                 times={"updated": "2026-09-29T09:30:00Z"},
+                                 jira=attention.JIRA_BASE + "FIRE-1")
+        view = attention.build_view([ticket], now=NOW, closed=[merged])
+        cards = {t["key"]: t["items"] for t in view["tiers"]}
+        self.assertEqual([r["ref"] for r in cards["ready"]], ["FIRE-1"])
+        self.assertEqual(cards["waiting"], [])
+        self.assertEqual([c["ref"] for c in cards["ready"][0]["children"]], ["r#7"])   # merged, struck
+        # the row's own tier is its header's; where it renders is the bucket, and
+        # the surface draws from the bucket (`section` once with_changes has run).
+        self.assertEqual(cards["ready"][0]["tier"], "waiting")
+        self.assertEqual(view["closed"], [])
 
     def test_section_only_move_does_not_repeat_the_tier(self):
         """A card coming back out of the closed log has the same state and tier;
@@ -1205,7 +1225,7 @@ class SnapshotContract(unittest.TestCase):
         merged = attention._item("MY PR", container="o/r", ref="r#5", states=["merged"],
                                  times={"updated": "2026-09-29T09:00:00Z"}, links=["o/r#9"])
         before = attention.payload(attention.build_view([open_item], now=NOW, closed=[merged]), now=NOW)
-        card = before["tiers"][2]["items"][0]                # the live issue names the card
+        card = next(i for t in before["tiers"] for i in t["items"])   # one card, headed by the live issue
         self.assertEqual(card["ref"], "r#9")
         self.assertEqual([c["ref"] for c in card["children"]], ["r#5"])
         after = attention.payload(attention.build_view([open_item], now=NOW, closed=[]), previous=before, now=NOW)

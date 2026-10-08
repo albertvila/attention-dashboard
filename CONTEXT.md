@@ -38,8 +38,9 @@ Our source-agnostic vocabulary for what an item is doing (`review-requested`,
 _Avoid_: status (that is Jira's own field name, not our vocabulary)
 
 **Tier**:
-The urgency class a card lands in: needs, ready, waiting. Derived from the
-first state that maps to one.
+The urgency class a card lands in: needs, ready, waiting. A card takes the best
+state in its cluster, so a merged member lifts a card whose live work waits; the
+row's own `tier` is its header's, and `section` is where it renders.
 _Avoid_: bucket, priority, lane
 
 **Section**:

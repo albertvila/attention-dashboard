@@ -162,7 +162,9 @@ jira          ticket URL when the branch/item names one; jira_issue = {type,stat
 states        [{key, label, tier, tone}]  — tone: info|warn|bad|good|quiet
 facts         [{label, tone}]
 times         {updated, created} — raw ISO, for consumers that format their own
-tier          needs | ready | waiting (the row's own tier; children derive from states)
+tier          needs | ready | waiting — the row's own tier, from its own states; a card's
+              placement is its cluster's best state, so the two can differ (a live
+              header waiting under a merged member reads tier=waiting, section=ready)
 section       needs | ready | waiting | drafts | closed — where the row is rendered
 children      linked items folded into this card (issue <-> PR <-> Jira)
 change        {kind: new|moved, label, from_*/to_*} — THIS generation only
@@ -204,8 +206,13 @@ A card is a cluster: items that reference each other (issue ↔ PR ↔ Jira key)
 one card, most urgent live member first, the rest as children. **Open and closed items
 cluster together**, so a merged PR stays with its ticket instead of splitting into
 the closed log — as a struck child under it, because finished work never names a card
-that still has live work and the card sits in the tier its live member is in. Only
-groups whose members are all closed go to the closed log.
+that still has live work. The **header** is the live member; the **tier** is the
+cluster's best state, so a merged PR lifts its own card to **Ready when you are** —
+that merged PR is the evidence that the live member's state is behind reality (a
+ticket still In Review, an issue nobody replied to), and the follow-up it leaves
+(closing the ticket, deploying it) belongs where you can act on it rather than buried
+among everything else waiting. Only groups whose members are all closed go to the
+closed log.
 
 ## With support (Jira)
 
