@@ -59,12 +59,17 @@ edit lands on your next look with no restart, and it is gitignored — your knob
 are yours.
 
 ```json
-{ "specRepos": ["acme/checkout-api"] }
+{
+  "specRepos": ["acme/checkout-api"],
+  "stalkTeams": ["squad-platform", "team-payments"]
+}
 ```
 
 | key | default | what it does |
 |---|---|---|
 | `specRepos` | `[]` | repos where the **Specs** rail takes every `spec`-labelled issue, whoever wrote it — for reading a teammate's proposal before someone takes it. Everywhere else the rail is yours alone. With watched rows in play the rail splits into **Mine** and **Watched repos**, each row showing its writer's avatar, the login on hover. |
+| `stalkTeams` | `[]` | GitHub team slugs whose members appear under Ongoing work. Click one to see their queue. Empty means no team list. |
+| `stalker` | on | The switch over that whole feature: `false` hides the team faces and refuses `/queue`, so nothing is read as anyone else — your `stalkTeams` list stays as it is. Absent means on. |
 
 ### What needs your machine
 

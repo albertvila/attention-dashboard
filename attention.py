@@ -1005,9 +1005,9 @@ class CliError(RuntimeError):
         super().__init__(output)
 
 
-STALK_TEAMS = (("DataCollection", "squad-platform"), ("DEN", "team-payments"))
 STALK_BOTS = {"bit-github-lm", "lm-sec-github", "lm-qinfei", "maxlaunchmetrics"}
 STALK_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+STALK_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
 class Cli:
@@ -1032,17 +1032,27 @@ LIVE = Cli()
 
 
 class AsThem(Cli):
-    """The same reads, as someone else's GitHub login. Jira and mail stay
-    out: those tools are authenticated as the person running this process."""
+    """The same reads, as someone else. GitHub queries use their login. Jira
+    queries use their account id. Mail stays out: gmcli only has your mailbox."""
 
-    def __init__(self, login, inner=None):
+    def __init__(self, login, account_id="", inner=None):
         self.login = login
+        self.account_id = account_id
         self.inner = inner or LIVE
 
     def text(self, command, args):
-        if command in ("twg", "gmcli"):
-            raise CliError(command, "skipped — not their Jira or mail")
-        return self.inner.text(command, [a.replace("@me", self.login) for a in args])
+        if command == "gmcli":
+            raise CliError(command, "skipped — not their mail")
+        args = [a.replace("@me", self.login) for a in args]
+        # Only the queries asking who *they* are need their account: a read by
+        # key is the same ticket for whoever asks. Without an account those
+        # who-am-I reads stay out, the way mail does — one skipped source, not
+        # a warning per ticket the queue happens to link.
+        if command == "twg" and any("currentUser()" in a for a in args):
+            if not self.account_id:
+                raise CliError(command, f"skipped — no Jira account matched {self.login}")
+            args = [a.replace("currentUser()", '"%s"' % self.account_id) for a in args]
+        return self.inner.text(command, args)
 
 
 def collect_view(me=None, cli=None):
@@ -1276,6 +1286,22 @@ def spec_repos(config):
     list of names is none of them, rather than a crash or a wandering search."""
     values = config.get("specRepos")
     return [v for v in values if isinstance(v, str)] if isinstance(values, list) else []
+
+
+def stalker_on(config):
+    """`stalker`: the switch over the whole teammate queue. Absent is on — an
+    empty `stalkTeams` is already an off — so only an explicit false closes it,
+    and your team list stays where it is while it is closed."""
+    return config.get("stalker") is not False
+
+
+def stalk_teams(config):
+    """`stalkTeams`: GitHub team slugs whose members appear under Ongoing work.
+    A missing or broken value is nobody, not a search of the whole org."""
+    values = config.get("stalkTeams")
+    if not isinstance(values, list):
+        return []
+    return [v.strip() for v in values if isinstance(v, str) and STALK_SLUG.match(v.strip() or "")]
 
 
 def spec_issues(cli=None, config=None):
@@ -1536,41 +1562,67 @@ def _error(where, exc):
     return entry
 
 
-_TEAM = None
-
-
-def team_members():
-    """DataCollection and Team DEN, bots left out. Not part of the snapshot."""
-    global _TEAM
-    if _TEAM is not None:
-        return _TEAM
+def team_members(config=None):
+    """Members of `stalkTeams` in config.json, bots left out. Not the snapshot.
+    Read each request, so editing the file changes the rail on the next look."""
+    config = load_config() if config is None else config
+    if not stalker_on(config):
+        return []
     people = {}
-    for label, slug in STALK_TEAMS:
-        for member in LIVE.json("gh", ["api", f"orgs/Launchmetrics/teams/{slug}/members"]):
+    for slug in stalk_teams(config):
+        try:
+            members = LIVE.json("gh", ["api", f"orgs/Launchmetrics/teams/{slug}/members"])
+        except CliError:
+            continue
+        for member in members:
             login = member.get("login") or ""
             if not login or login in STALK_BOTS:
                 continue
             person = people.setdefault(login, {"login": login, "name": login, "teams": []})
-            if label not in person["teams"]:
-                person["teams"].append(label)
+            if slug not in person["teams"]:
+                person["teams"].append(slug)
     for login, person in people.items():
         try:
             user = LIVE.json("gh", ["api", f"users/{login}"])
             person["name"] = user.get("name") or login
         except CliError:
             pass
-    _TEAM = sorted(people.values(), key=lambda p: p["name"].lower())
-    return _TEAM
+    return sorted(people.values(), key=lambda p: p["name"].lower())
 
 
-def their_queue(login):
-    """One teammate's GitHub queue, computed now and not written down."""
+def jira_account(login):
+    """GitHub login -> Jira account id, via the name GitHub publishes.
+    Empty when GitHub has no name or Jira has no exact match."""
+    try:
+        name = (LIVE.json("gh", ["api", f"users/{login}"]).get("name") or "").strip()
+    except CliError:
+        return ""
+    if not name:
+        return ""
+    try:
+        found = LIVE.json("twg", ["user", "search", "--name", name, "--limit", "5",
+                                   "--output", "json", "--output-summary", "none"])
+    except CliError:
+        return ""
+    people = found.get("data") if isinstance(found, dict) else found
+    if not isinstance(people, list):
+        return ""
+    exact = [p for p in people if (p.get("name") or "").lower() == name.lower()]
+    return ((exact or people)[0].get("accountId") or "") if (exact or people) else ""
+
+
+def their_queue(login, config=None):
+    """One teammate's queue, computed now and not written down. With the
+    switch off nothing is read at all."""
+    if not stalker_on(load_config() if config is None else config):
+        return {"error": "stalker is off"}
     if not STALK_LOGIN.match(login or ""):
         return {"error": "bad login"}
-    view = collect_view(me=login, cli=AsThem(login))
+    account = jira_account(login)
+    view = collect_view(me=login, cli=AsThem(login, account))
     view["errors"] = [e for e in view.get("errors") or []
                        if "skipped" not in (e.get("output") or "")]
-    return view
+    return payload(view)
 
 
 # --- HTTP -------------------------------------------------------------------

@@ -277,7 +277,7 @@ async function load(isRefresh){
     const backlog = await specRes.json().catch(() => ({}));
     specs = backlog.issues || []; specErrors = backlog.errors || [];
     snap = data;
-    view = AttentionView.overlay(data, {seenAt, snoozes, acks, specs});
+    view = AttentionView.overlay(data, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
     render(data);
     /* The Briefing opens with the sentence; the snapshot's own stamp stays
        underneath it. */
@@ -288,7 +288,7 @@ async function load(isRefresh){
     if(viewing){
       const note = el('p', 'viewing-banner');
       note.id = 'viewing';
-      note.appendChild(document.createTextNode('Viewing ' + viewing + ' \u00b7 GitHub queue only \u00b7 '));
+      note.appendChild(document.createTextNode('Viewing ' + viewing + ' \u00b7 read only \u00b7 '));
       const back = el('button', null, 'back to you');
       back.onclick = () => { location.search = ''; };
       note.appendChild(back);
@@ -502,6 +502,7 @@ let team = [];
 function paintTeam(){
   const old = sessionsRail.querySelector('.team');
   if(old) old.remove();
+  if(!team.length) return;      // no teams listed, or the stalker switched off: no box, no way in
   const box = el('div', 'team');
   box.appendChild(el('h2', null, 'Team'));
   const you = el('button', 'teammate' + (viewing ? '' : ' on'), 'You');

@@ -893,7 +893,7 @@ class OpenSessions(unittest.TestCase):
                 "author": {"login": author} if author else None,
                 "repository": {"nameWithOwner": repo}}
 
-    def test_a_teammate_read_uses_their_login_and_skips_jira_and_mail(self):
+    def test_a_teammate_read_uses_their_login_and_skips_only_what_needs_it(self):
         seen = []
 
         class Rec:
@@ -901,13 +901,24 @@ class OpenSessions(unittest.TestCase):
                 seen.append([command] + list(args))
                 return "{}"
 
-        cli = attention.AsThem("teammate-one", inner=Rec())
+        cli = attention.AsThem("teammate-one", account_id="abc", inner=Rec())
         self.assertEqual(cli.text("gh", ["search", "issues", "--assignee=@me"]), "{}")
         self.assertEqual(seen[-1], ["gh", "search", "issues", "--assignee=teammate-one"])
-        with self.assertRaises(attention.CliError):
-            cli.text("twg", ["jira"])
+        self.assertEqual(cli.text("twg", ["jira", "query", "assignee = currentUser()"]), "{}")
+        self.assertEqual(seen[-1][-1], 'assignee = "abc"')
         with self.assertRaises(attention.CliError):
             cli.text("gmcli", ["x"])
+
+        # No account to read as: the who-am-I sources stand down, but a read by
+        # key is the same ticket for anyone, so it still goes through.
+        theirs = attention.AsThem("teammate-two", inner=Rec())
+        self.assertEqual(theirs.text("twg", ["jira", "workitem", "get", "RBT-949"]), "{}")
+        self.assertEqual(seen[-1], ["twg", "jira", "workitem", "get", "RBT-949"])
+        with self.assertRaises(attention.CliError) as caught:
+            theirs.text("twg", ["jira", "workitem", "query", "--jql", "assignee = currentUser()"])
+        # "skipped" is the word their_queue drops: a source that is off for
+        # them, not a queue that broke.
+        self.assertIn("skipped", caught.exception.output)
 
     def test_a_tool_this_machine_lacks_is_not_a_failure(self):
         """A missing CLI is a source that is off here: named for the work sources,
@@ -1045,6 +1056,24 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(attention.spec_repos({"specRepos": "all"}), [])
         self.assertEqual(attention.spec_repos({"specRepos": ["o/r", 7, None]}), ["o/r"])
         self.assertEqual(attention.load_config("/nonexistent/config.json"), {})
+        self.assertEqual(attention.stalk_teams({}), [])
+        self.assertEqual(attention.stalk_teams({"stalkTeams": "squad-platform"}), [])
+        self.assertEqual(attention.stalk_teams(
+            {"stalkTeams": ["squad-platform", "../evil", 3, "team-payments"]}),
+            ["squad-platform", "team-payments"])
+
+    def test_the_stalker_switch_closes_the_teammate_queue(self):
+        """`stalker: false` is the whole feature off: no faces to click and no
+        queue read behind one, without touching the team list itself."""
+        teams = {"stalkTeams": ["squad-platform"]}
+        self.assertTrue(attention.stalker_on({}))          # absent is on
+        self.assertTrue(attention.stalker_on(dict(teams, stalker=True)))
+        self.assertTrue(attention.stalker_on({"stalker": "no"}))
+        off = dict(teams, stalker=False)
+        self.assertFalse(attention.stalker_on(off))
+        self.assertEqual(attention.team_members(config=off), [])
+        self.assertEqual(attention.their_queue("teammate-one", config=off),
+                         {"error": "stalker is off"})
 
     def test_focus_runs_only_the_commands_a_session_needs_and_only_for_an_id(self):
         cli = self.Fake()
