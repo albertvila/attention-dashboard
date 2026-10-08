@@ -1382,10 +1382,10 @@ class SnapshotContract(unittest.TestCase):
         # the honest stamp is the closure time, so a reader can still see it is fresh
         self.assertEqual(row["firstSeenAt"], "2026-09-28T14:00:00Z")
 
-    def test_a_header_that_moves_leaves_its_ticket_inline_not_gone(self):
-        """The header names its own Jira ticket inline, so the ticket is not a row
-        while it is the header. When another member outranks it the ticket becomes
-        that inline name — still on screen, so it must not be reported gone."""
+    def test_the_work_ticket_keeps_naming_a_card_its_failing_pr_drags_to_needs(self):
+        """The face is chosen by kind, not urgency: a Jira ticket names its card
+        whatever the PR under it is doing. When the PR breaks, the card lands in
+        Needs with the same face and the PR still riding as its child."""
         jira = "https://launchmetrics.atlassian.net/browse/RBT-1"
         ticket = attention._item("JIRA", source="jira", ref="RBT-1", title="ticket",
                                  states=["to-deploy"], times={"updated": "2026-09-29T08:00:00Z"})
@@ -1398,9 +1398,26 @@ class SnapshotContract(unittest.TestCase):
         failed = dict(pr, states=["ci-failing"])
         after = attention.payload(attention.build_view([ticket, failed], now=NOW),
                                   previous=before, now=NOW)
-        self.assertEqual(after["tiers"][0]["items"][0]["ref"], "r#7")   # the PR now leads
-        self.assertEqual([c["ref"] for c in after["tiers"][0]["items"][0]["children"]], [])
+        needs = after["tiers"][0]["items"][0]                     # the failing PR lands it
+        self.assertEqual(needs["ref"], "RBT-1")
+        self.assertEqual([c["ref"] for c in needs["children"]], ["r#7"])
         self.assertEqual(after["changes"]["gone"], [])
+
+    def test_a_ticket_the_header_names_inline_is_not_reported_gone(self):
+        """#24: a header names its linked Jira ticket inline rather than as a
+        child, so that key is on screen even once the Jira read stops returning
+        the item. Calling it dropped ghosts it back into the tier it left."""
+        jira = "https://launchmetrics.atlassian.net/browse/RBT-1"
+        ticket = attention._item("JIRA", source="jira", ref="RBT-1", title="ticket",
+                                 states=["to-deploy"], times={"updated": "2026-09-29T08:00:00Z"})
+        pr = attention._item("MY PR", container="o/r", ref="r#7", title="pr", jira=jira,
+                             states=["waiting"], times={"updated": "2026-09-29T09:00:00Z"})
+        before = attention.payload(attention.build_view([ticket, pr], now=NOW), now=NOW)
+        later = NOW + timedelta(hours=1)
+        after = attention.payload(attention.build_view([pr], now=later),
+                                  previous=before, now=later)
+        self.assertEqual(after["tiers"][2]["items"][0]["ref"], "r#7")
+        self.assertEqual(after["changes"]["gone"], [])            # still named inline
 
     def test_rows_carry_their_section(self):
         view = self.view([self.item(1, "waiting")])
