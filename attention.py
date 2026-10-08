@@ -104,6 +104,9 @@ def _check_state(check):
 
 PR_FIELDS = "number,title,repository,author,createdAt,updatedAt,isDraft,url,labels"
 ISSUE_FIELDS = "number,title,repository,createdAt,updatedAt,url,commentsCount,labels"
+# `author` rides on every spec row: the rail shows the writer's avatar, and its
+# title is the name — no second call, GitHub serves `<login>.png`.
+SPEC_FIELDS = "number,title,repository,url,updatedAt,assignees,author"
 
 JIRA_BASE = "https://launchmetrics.atlassian.net/browse/"
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+")
@@ -1063,6 +1066,13 @@ def ack_path():
     return _state_path("acks.json")
 
 
+def config_path():
+    """The few knobs that tune one person's dashboard, beside the snapshot like
+    parking. Read per request, so an edit lands on the next look; absent means
+    the defaults."""
+    return _state_path("config.json")
+
+
 def _read_json(path):
     """Forgiving read: a missing or broken file just means nothing is in it."""
     try:
@@ -1164,24 +1174,59 @@ def live_sessions(cli=None):
     return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "repos": repos, "errors": errors}
 
 
-def spec_issues(cli=None):
+def load_config(path=None):
+    """config.json beside the snapshot. Forgiving read: a missing or broken file
+    is the defaults, never an error — the same bargain snoozes and acks make."""
+    data = _read_json(path or config_path())
+    return data if isinstance(data, dict) else {}
+
+
+def spec_repos(config):
+    """`specRepos`: the repos where a `spec`-labelled issue is worth reading
+    whoever wrote it. Everywhere else the rail stays mine. A value that is not a
+    list of names is none of them, rather than a crash or a wandering search."""
+    values = config.get("specRepos")
+    return [v for v in values if isinstance(v, str)] if isinstance(values, list) else []
+
+
+def spec_issues(cli=None, config=None):
     """The proposals I wrote and labelled `spec` that nobody has taken: open and
     **unassigned**. An assignee means someone is already working on it, so it is
     not groundwork any more — and that someone is usually me, which is exactly why
-    those tickets are already on the board."""
+    those tickets are already on the board.
+
+    The repos named in `config.json` are read for anyone's spec instead: a
+    teammate's proposal is groundwork I may want to read before it is taken, and
+    a queue that only ever shows my own would hide it until someone assigns it.
+    Every row carries its `author` and says whether it came from a watched repo,
+    so a surface can keep my own backlog apart from what I am watching."""
     cli = cli or LIVE
-    try:
-        found = cli.json("gh", ["search", "issues", "--author=@me", "--label=spec",
-                                 "--state=open", "--limit", "40", "--json",
-                                 "number,title,repository,url,updatedAt,assignees"])
-    except Exception as e:
-        return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "issues": [],
-                "errors": [_error("spec issues", e)]}
-    issues = [{"repo": i["repository"]["nameWithOwner"], "number": i["number"],
-               "ref": f'{i["repository"]["nameWithOwner"]}#{i["number"]}',
-               "title": i["title"], "url": i["url"], "updated": _iso(i["updatedAt"])}
-              for i in found if not i.get("assignees")]
-    return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "issues": issues, "errors": []}
+    config = load_config() if config is None else config
+    # Mine first, so a spec both searches return is read as mine.
+    searches = [(["search", "issues", "--author=@me", "--label=spec"], "spec issues", False)]
+    searches += [(["search", "issues", "--repo", repo, "--label=spec"],
+                  f"spec issues ({repo})", True) for repo in spec_repos(config)]
+    issues, errors, seen = [], [], set()
+    for args, where, watched in searches:
+        try:
+            found = cli.json("gh", args + ["--state=open", "--limit", "40",
+                                            "--json", SPEC_FIELDS])
+        except Exception as e:
+            errors.append(_error(where, e))
+            continue
+        for i in found:
+            if i.get("assignees"):
+                continue
+            ref = f'{i["repository"]["nameWithOwner"]}#{i["number"]}'
+            if ref in seen:
+                continue
+            seen.add(ref)
+            issues.append({"repo": i["repository"]["nameWithOwner"], "number": i["number"],
+                           "ref": ref, "title": i["title"], "url": i["url"],
+                           "updated": _iso(i["updatedAt"]),
+                           "author": (i.get("author") or {}).get("login", ""),
+                           "watched": watched})
+    return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "issues": issues, "errors": errors}
 
 
 def focus(request, cli=None):

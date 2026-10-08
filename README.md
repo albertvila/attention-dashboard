@@ -37,7 +37,7 @@ the snapshot it is showing is over an hour old.
 
 ### Configuration
 
-Read from the environment at startup:
+Two environment variables, read at startup:
 
 | variable | default | what it does |
 |---|---|---|
@@ -51,6 +51,18 @@ queue, not your mail. It is also the address that decides a card's state: the
 last sender matching it reads `waiting-reply`, anyone else `needs-reply`. Point
 it at a mailbox `gmcli` does not have and you get the error; point it at the
 wrong mailbox and every card reads backwards.
+
+And one file: `config.json`, beside the snapshot. It is read per request, so an
+edit lands on your next look with no restart, and it is gitignored — your knobs
+are yours.
+
+```json
+{ "specRepos": ["acme/checkout-api"] }
+```
+
+| key | default | what it does |
+|---|---|---|
+| `specRepos` | `[]` | repos where the **Specs** rail takes every `spec`-labelled issue, whoever wrote it — for reading a teammate's proposal before someone takes it. Everywhere else the rail is yours alone. With watched rows in play the rail splits into **Mine** and **Watched repos**, each row showing its writer's avatar, the login on hover. |
 
 ### What needs your machine
 
@@ -70,8 +82,9 @@ contract, ignorable if it is not your workflow.
   Anything past a ceiling is absent, not error-flagged.
 - **The server is unauthenticated.** It serves and writes on `127.0.0.1` only,
   and `/focus` moves windows on this machine — do not bind it to a LAN address.
-- **Parking does not travel.** `snoozes.json` and `acks.json` sit beside the
-  snapshot and are gitignored, like `attention.json`: your parking is yours.
+- **Nothing personal travels.** `snoozes.json`, `acks.json` and `config.json` sit
+  beside the snapshot and are gitignored, like `attention.json`: your parking and
+  your knobs stay yours.
 
 ## The snapshot file
 
@@ -238,10 +251,16 @@ git remote, so no name guessing is involved.
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and
 it is usually me — means someone is already on it, which is exactly why those
-tickets are already on the board. They render in a rail beside the board and never
-in a tier: the queue by definition only carries work someone needs now. One that
-the queue is showing anyway reads `already on the board`, because a spec you are
-looking at is not a suggestion.
+tickets are already on the board. A repo named in `config.json`'s `specRepos` is
+read for **anyone's** spec instead: the one read that reaches past my own work,
+because a teammate's proposal is a thing I may want to read before somebody takes
+it. Mine and the watched ones are two readings, so when both have something the
+rail renders them as two labelled lists rather than one. Every row carries its
+writer's GitHub avatar, the login on hover — the rail's only fetch from anywhere
+but this machine, and offline a row simply loses its face. They render in a rail
+beside the board and never in a tier: the queue by definition only carries work
+someone needs now. One that the queue is showing anyway reads `already on the
+board`, because a spec you are looking at is not a suggestion.
 
 `POST /focus` is the one write that moves a window instead of a file: it runs
 `herdr tab focus <tab>` — which raises Herdr itself — or `bb thread open <thread>`
@@ -397,9 +416,12 @@ from `attention-view.js`.
   `/sessions` at every look, so the rail is machine state, never a snapshot, and
   the repository name on the card is the whole join.
 - **Specs** are a left rail: the open issues I wrote with the `spec` label that
-  nobody has taken (no assignee), each linking to GitHub, marked `already on the
-  board` when the queue is already showing it. Browse material beside the board —
-  never a tier, never a count, never parkable.
+  nobody has taken (no assignee) — plus, in the repos `config.json` names,
+  everyone's, kept apart as **Mine** and **Watched repos** when both have
+  something. Each row carries its writer's avatar with the login on hover, links
+  to GitHub, and reads `already on the board` when the queue is already showing
+  it. Browse material beside the board — never a tier, never a count, never
+  parkable.
 - Parking is an explicit control on every card and writes the same `snoozes.json`
   / `acks.json` files as ever; a parked card still counts in the header line.
 

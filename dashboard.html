@@ -40,8 +40,13 @@ main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
 .rail{position:sticky;top:120px;border:1px solid #30363d;border-radius:8px;padding:12px 14px;background:#0d1117}
 .rail h2{margin:0 0 4px}
 .railtip{margin:0 0 8px;color:#8b949e;font-size:11.5px;line-height:1.4}
-a.spec{display:block;padding:8px 0;border-top:1px solid #21262d;text-decoration:none;color:#e6edf3}
+a.spec{display:flex;gap:7px;align-items:flex-start;padding:8px 0;border-top:1px solid #21262d;text-decoration:none;color:#e6edf3}
 a.spec:hover .spectitle{text-decoration:underline}
+/* The writer's face, and their name on hover: the only thing the rail fetches
+   from anywhere but this machine, and a row without it reads fine. */
+.specav{width:16px;height:16px;border-radius:50%;flex:0 0 auto;background:#30363d;margin-top:1px}
+.spectext{min-width:0}
+.specgroup{margin:11px 0 3px;color:#8b949e;font-size:11px;font-weight:600}
 .specref{display:block;color:#79c0ff;font-size:11px;margin-bottom:2px}
 .spectitle{display:block;font-size:12.5px;line-height:1.35}
 .specage{display:block;color:#8b949e;font-size:11px;margin-top:3px}
@@ -328,7 +333,7 @@ function render(data){
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, unread mail, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
     'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
-    'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. One that the queue is showing anyway reads "already on the board".',
+    'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Parking — the picker on each card snoozes it until a time (4 hours / 1 day / 3 days / 1 week) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
   ]));
@@ -441,25 +446,50 @@ function paintSessions(){
   for(const [repo, live] of repos) sessionsRail.appendChild(sessionBox(repo, live));
 }
 
-/* The specs rail: issues I wrote with the spec label, waiting for nobody. Browse
-   material beside the board — no tier counts, nothing in it can be parked. The
-   list comes from the rules, not the raw read: `onBoard` is theirs to decide. */
+/* The specs rail: issues with the spec label that nobody has taken, waiting for
+   nobody — mine, plus everyone's in the repos config.json names. Those are two
+   readings, not one, so when both have something they say so. Browse material
+   beside the board — no tier counts, nothing in it can be parked. The list comes
+   from the rules, not the raw read: `onBoard` is theirs to decide. */
+function specRow(s){
+  const a = document.createElement('a');
+  a.className = 'spec'; a.href = s.url; a.target = '_blank'; a.rel = 'noreferrer';
+  if(s.author){
+    const av = document.createElement('img');
+    av.className = 'specav';
+    av.src = 'https://github.com/' + encodeURIComponent(s.author) + '.png?size=32';
+    av.alt = ''; av.title = s.author; av.width = 16; av.height = 16; av.loading = 'lazy';
+    av.onerror = () => av.remove();     // offline is a row without a face, not a broken glyph
+    a.appendChild(av);
+  }
+  const text = el('span','spectext');
+  text.appendChild(el('span','specref', s.repo.split('/').pop() + '#' + s.number));
+  text.appendChild(el('span','spectitle', s.title));
+  text.appendChild(el('span','specage', 'opened ' + ageOf(s.updated)
+    + (s.onBoard ? ' · already on the board' : '')));
+  a.appendChild(text);
+  return a;
+}
+
 function paintSpecs(){
   const list = (view && view.specs) || [];
+  const mine = list.filter(s => !s.watched), watched = list.filter(s => s.watched);
   specsRail.innerHTML = '';
   specsRail.appendChild(el('h2', null, 'Specs · ' + list.length));
-  specsRail.appendChild(el('p','railtip','Open issues I wrote with the spec label that nobody has taken: no assignee. A backlog, not the queue.'));
+  specsRail.appendChild(el('p','railtip', watched.length
+    ? 'Open issues with the spec label that nobody has taken: mine, and every one in the repos this dashboard watches — whoever wrote it. A backlog, not the queue.'
+    : 'Open issues I wrote with the spec label that nobody has taken: no assignee. A backlog, not the queue.'));
   for(const err of specErrors) specsRail.appendChild(el('p','railtip','\u26a0 ' + err.where + ' failed'));
   if(!list.length && !specErrors.length) specsRail.appendChild(el('p','railtip','No open spec issues.'));
-  for(const s of list){
-    const a = document.createElement('a');
-    a.className = 'spec'; a.href = s.url; a.target = '_blank'; a.rel = 'noreferrer';
-    a.appendChild(el('span','specref', s.repo.split('/').pop() + '#' + s.number));
-    a.appendChild(el('span','spectitle', s.title));
-    a.appendChild(el('span','specage', 'opened ' + ageOf(s.updated)
-      + (s.onBoard ? ' · already on the board' : '')));
-    specsRail.appendChild(a);
+  /* One list only when there is nothing to tell apart. */
+  if(!mine.length || !watched.length){
+    list.forEach(s => specsRail.appendChild(specRow(s)));
+    return;
   }
+  specsRail.appendChild(el('div','specgroup', 'Mine · ' + mine.length));
+  mine.forEach(s => specsRail.appendChild(specRow(s)));
+  specsRail.appendChild(el('div','specgroup', 'Watched repos · ' + watched.length));
+  watched.forEach(s => specsRail.appendChild(specRow(s)));
 }
 
 /* One card renderer: a Needs block, a Ready line, a Waiting line, a group line,

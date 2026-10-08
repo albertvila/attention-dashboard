@@ -735,9 +735,12 @@ class OpenSessions(unittest.TestCase):
     class Fake:
         """Only what these two reads touch: herdr panes, bb threads and projects,
         git remotes, and gh's own issue search."""
-        def __init__(self, panes=(), threads=(), projects=(), remotes=None, issues=None, fail=()):
+        def __init__(self, panes=(), threads=(), projects=(), remotes=None, issues=None,
+                     issues_by_repo=None, fail=(), fail_repos=()):
             self.panes, self.threads, self.projects = list(panes), list(threads), list(projects)
             self.remotes, self.issues, self.fail, self.calls = remotes or {}, list(issues or []), set(fail), []
+            # a watched-repo search answers for its own repo, and can fail alone
+            self.issues_by_repo, self.fail_repos = dict(issues_by_repo or {}), set(fail_repos)
 
         def json(self, command, args):
             self.calls.append([command] + list(args))
@@ -748,7 +751,10 @@ class OpenSessions(unittest.TestCase):
             if command == "bb":
                 return self.projects if args[0] == "project" else self.threads
             if command == "gh":
-                return self.issues
+                repo = args[args.index("--repo") + 1] if "--repo" in args else None
+                if repo in self.fail_repos:
+                    raise attention.CliError(command, "boom")
+                return self.issues_by_repo.get(repo, []) if repo else self.issues
             raise AssertionError(command)
 
         def text(self, command, args):
@@ -765,6 +771,14 @@ class OpenSessions(unittest.TestCase):
                 "agent": "pi", "agent_status": "working", "terminal_title_stripped": "\u03c0 - shared-lib"}
         pane.update(over)
         return pane
+
+    def spec(self, number, repo, author="", assignees=()):
+        """One gh search-issue row, in the shape the specs read asks for."""
+        return {"number": number, "title": f"spec {number}",
+                "url": f"https://github.com/{repo}/issues/{number}",
+                "updatedAt": "2026-10-06T15:00:00Z", "assignees": list(assignees),
+                "author": {"login": author} if author else None,
+                "repository": {"nameWithOwner": repo}}
 
     def test_a_pane_is_a_session_per_repo_with_its_own_tab(self):
         cli = self.Fake(panes=[self.pane()],
@@ -833,19 +847,60 @@ class OpenSessions(unittest.TestCase):
             {"number": 1338, "title": "App releases follow the company CI/CD standard",
              "url": "https://github.com/acme/billing-service/issues/1338",
              "updatedAt": "2026-10-06T15:46:30Z", "assignees": [],
+             "author": {"login": "albertvila"},
              "repository": {"nameWithOwner": "acme/billing-service"}},
             {"number": 413, "title": "Read consolidated docs once",
              "url": "https://github.com/acme/shared-lib/issues/413",
              "updatedAt": "2026-10-06T15:10:09Z", "assignees": [{"login": "albertvila"}],
              "repository": {"nameWithOwner": "acme/shared-lib"}}])
-        issues = attention.spec_issues(cli=cli)["issues"]
+        issues = attention.spec_issues(cli=cli, config={})["issues"]
         self.assertEqual([i["ref"] for i in issues], ["acme/billing-service#1338"])
         self.assertEqual(issues[0]["repo"], "acme/billing-service")
         self.assertEqual(issues[0]["updated"], "2026-10-06T15:46:30Z")
+        self.assertEqual(issues[0]["author"], "albertvila")     # the rail draws their face
+        self.assertFalse(issues[0]["watched"])                # read as mine, so no second list
         self.assertIn("--label=spec", cli.calls[0])
         self.assertIn("assignees", cli.calls[0][-1])      # the read asks who took it
-        failed = attention.spec_issues(cli=self.Fake(fail=("gh",)))
+        failed = attention.spec_issues(cli=self.Fake(fail=("gh",)), config={})
         self.assertEqual((failed["issues"], [e["where"] for e in failed["errors"]]), ([], ["spec issues"]))
+
+    def test_a_watched_repo_specs_are_read_whoever_wrote_them(self):
+        """config.json's specRepos: a teammate's proposal is groundwork I may want
+        to read before it is taken — in the repos I named, and only there. Each row
+        says which read it came from, so a rail can keep the two apart."""
+        cli = self.Fake(issues=[self.spec(10, "acme/shared-lib", author="albertvila")],
+                        issues_by_repo={"acme/checkout-api":
+                                        [self.spec(7, "acme/checkout-api", author="djo19")]})
+        out = attention.spec_issues(cli=cli, config={"specRepos": ["acme/checkout-api"]})
+        self.assertEqual([i["ref"] for i in out["issues"]],
+                         ["acme/shared-lib#10", "acme/checkout-api#7"])
+        self.assertEqual([i["author"] for i in out["issues"]], ["albertvila", "djo19"])
+        self.assertEqual([i["watched"] for i in out["issues"]], [False, True])
+        self.assertIn("--author=@me", cli.calls[0])
+        self.assertNotIn("--author=@me", cli.calls[1])
+        self.assertEqual(cli.calls[1][cli.calls[1].index("--repo") + 1], "acme/checkout-api")
+        self.assertEqual(out["errors"], [])
+
+    def test_a_watched_repo_never_lists_the_same_spec_twice(self):
+        """Mine is read first and wins, so it stays in the mine list."""
+        spec = self.spec(10, "o/r", author="me")
+        cli = self.Fake(issues=[spec], issues_by_repo={"o/r": [spec]})
+        out = attention.spec_issues(cli=cli, config={"specRepos": ["o/r"]})
+        self.assertEqual([i["ref"] for i in out["issues"]], ["o/r#10"])
+        self.assertEqual((out["issues"][0]["author"], out["issues"][0]["watched"]), ("me", False))
+
+    def test_one_failing_watched_repo_costs_only_itself(self):
+        cli = self.Fake(issues=[self.spec(10, "o/mine")], fail_repos=("o/broken",))
+        out = attention.spec_issues(cli=cli, config={"specRepos": ["o/broken"]})
+        self.assertEqual([i["ref"] for i in out["issues"]], ["o/mine#10"])
+        self.assertEqual([e["where"] for e in out["errors"]], ["spec issues (o/broken)"])
+
+    def test_a_config_that_says_nothing_readable_is_the_defaults(self):
+        """A stray string is none of them, not a search per character."""
+        self.assertEqual(attention.spec_repos({}), [])
+        self.assertEqual(attention.spec_repos({"specRepos": "all"}), [])
+        self.assertEqual(attention.spec_repos({"specRepos": ["o/r", 7, None]}), ["o/r"])
+        self.assertEqual(attention.load_config("/nonexistent/config.json"), {})
 
     def test_focus_runs_only_the_commands_a_session_needs_and_only_for_an_id(self):
         cli = self.Fake()

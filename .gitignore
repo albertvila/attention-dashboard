@@ -9,3 +9,6 @@ __pycache__/
 attention.json
 snoozes.json
 acks.json
+
+# yours, not the repo's: the knobs in config.json tune your own dashboard
+config.json
