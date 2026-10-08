@@ -1157,7 +1157,8 @@ def live_sessions(cli=None):
                 bb={"thread": thread.group(1)} if thread else None,
                 pane=pane.get("pane_id", ""))
     except Exception as e:
-        errors.append(_error("herdr sessions", e))
+        if not _absent(e):                # a tool this machine lacks shows no sessions
+            errors.append(_error("herdr sessions", e))
 
     try:
         projects = {p["id"]: p for p in cli.json("bb", ["project", "list", "--json"])}
@@ -1169,7 +1170,8 @@ def live_sessions(cli=None):
             add(_slug_for(path, cli) if path else "", thread.get("providerId") or "bb", "active",
                 thread.get("title") or thread["id"], True, "bb", bb={"thread": thread["id"]})
     except Exception as e:
-        errors.append(_error("bb sessions", e))
+        if not _absent(e):
+            errors.append(_error("bb sessions", e))
 
     return {"generatedAt": _iso_utc(datetime.now(timezone.utc)), "repos": repos, "errors": errors}
 
@@ -1375,7 +1377,10 @@ def _with_jira(items, errors, fetch):
                 item["jira"] = ""
             elif key not in reported:
                 reported.add(key)
-                errors.append(_error(f"jira {key}", failures[key]))
+                # An absent twg is one error — the source's own — not one per key:
+                # the queue's own warnings must not bury what the queue holds.
+                if not _absent(failures[key]):
+                    errors.append(_error(f"jira {key}", failures[key]))
     return items
 
 
@@ -1427,10 +1432,21 @@ def _issue_links(cli, repo, num):
     return cli.graphql(query)["data"]["repository"]["issue"]
 
 
+def _absent(exc):
+    """True when the failure is a CLI this machine does not have — a capability
+    it never had, not a read that broke. The session readers treat that as
+    nothing to show; every other source still says which tool is missing."""
+    return isinstance(exc, FileNotFoundError)
+
+
 def _error(where, exc):
     if isinstance(exc, CliError):
         return {"where": where, "command": exc.command, "output": exc.output}
-    return {"where": where, "command": "", "output": f"{type(exc).__name__}: {exc}"}
+    entry = {"where": where, "command": "", "output": f"{type(exc).__name__}: {exc}"}
+    if _absent(exc):
+        # Not a red box: the source is off on this machine, and this names the tool.
+        entry["missing"] = exc.filename
+    return entry
 
 
 # --- HTTP -------------------------------------------------------------------

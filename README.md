@@ -20,8 +20,10 @@ Four CLIs, each authenticated as *you*:
 | `gmcli` | starred mail | `npm i -g @mariozechner/gmcli`, then `gmcli accounts credentials <file.json>` once, then `gmcli accounts add <you@launchmetrics.com>` — check with `gmcli accounts list` |
 
 Not one of them is a hard prerequisite. A missing CLI costs its source and
-nothing else: the page opens with `⚠ <source> failed — this queue is partial`
-and the rest of the queue renders anyway.
+nothing else, and the page names the one to add: `⚠ mail is off: gmcli is not
+installed — this queue is partial`. The rest of the queue renders anyway. The
+session rails are the one exception — they just go quiet, because a machine
+without herdr or bb has no sessions to show, which is not a failure.
 
 Then, from this directory:
 

@@ -736,14 +736,17 @@ class OpenSessions(unittest.TestCase):
         """Only what these two reads touch: herdr panes, bb threads and projects,
         git remotes, and gh's own issue search."""
         def __init__(self, panes=(), threads=(), projects=(), remotes=None, issues=None,
-                     issues_by_repo=None, fail=(), fail_repos=()):
+                     issues_by_repo=None, fail=(), fail_repos=(), absent=()):
             self.panes, self.threads, self.projects = list(panes), list(threads), list(projects)
             self.remotes, self.issues, self.fail, self.calls = remotes or {}, list(issues or []), set(fail), []
             # a watched-repo search answers for its own repo, and can fail alone
             self.issues_by_repo, self.fail_repos = dict(issues_by_repo or {}), set(fail_repos)
+            self.absent = set(absent)          # a CLI this machine does not have
 
         def json(self, command, args):
             self.calls.append([command] + list(args))
+            if command in self.absent:
+                raise FileNotFoundError(2, "No such file or directory", command)
             if command in self.fail:
                 raise attention.CliError(command, "boom")
             if command == "herdr":
@@ -779,6 +782,21 @@ class OpenSessions(unittest.TestCase):
                 "updatedAt": "2026-10-06T15:00:00Z", "assignees": list(assignees),
                 "author": {"login": author} if author else None,
                 "repository": {"nameWithOwner": repo}}
+
+    def test_a_tool_this_machine_lacks_is_not_a_failure(self):
+        """A missing CLI is a source that is off here: named for the work sources,
+        and simply nothing to show for the session rails — herdr and bb are this
+        machine's own readers, so a machine without them has no sessions."""
+        gone = attention.live_sessions(cli=self.Fake(absent=("herdr", "bb")))
+        self.assertEqual((gone["repos"], gone["errors"]), ({}, []))
+        broken = attention.live_sessions(cli=self.Fake(fail=("herdr", "bb")))
+        self.assertEqual([e["where"] for e in broken["errors"]],
+                         ["herdr sessions", "bb sessions"])   # a real break still says so
+
+        absent = attention._error("mail", FileNotFoundError(2, "No such file or directory", "gmcli"))
+        self.assertEqual(absent["missing"], "gmcli")
+        self.assertNotIn("missing", attention._error("mail", attention.CliError("gmcli x", "auth expired")))
+        self.assertNotIn("missing", attention._error("mail", ValueError("bad json")))
 
     def test_a_pane_is_a_session_per_repo_with_its_own_tab(self):
         cli = self.Fake(panes=[self.pane()],

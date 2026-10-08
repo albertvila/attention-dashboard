@@ -287,7 +287,11 @@ function render(data){
   if(staleText) app.appendChild(el('div','err', staleText));
   /* A failed source means a smaller queue, not a smaller workload: say so
      before the tiers, not after the help box. */
-  for(const e of data.errors) app.appendChild(errBox(e, '\u26a0 ' + e.where + ' failed — this queue is partial'));
+  /* A missing CLI is a source that is off on this machine, not a break — but it
+     still makes the queue partial, so it stays loud and names the tool to add. */
+  for(const e of data.errors) app.appendChild(errBox(e, e.missing
+    ? '\u26a0 ' + e.where + ' is off: ' + e.missing + ' is not installed — this queue is partial (Run it yourself in the README)'
+    : '\u26a0 ' + e.where + ' failed — this queue is partial'));
   for(const tier of view.tiers){
     const s = document.createElement('section');
     s.appendChild(el('h2', null, tier.title + ' · ' + tier.count));
@@ -479,7 +483,9 @@ function paintSpecs(){
   specsRail.appendChild(el('p','railtip', watched.length
     ? 'Open issues with the spec label that nobody has taken: mine, and every one in the repos this dashboard watches — whoever wrote it. A backlog, not the queue.'
     : 'Open issues I wrote with the spec label that nobody has taken: no assignee. A backlog, not the queue.'));
-  for(const err of specErrors) specsRail.appendChild(el('p','railtip','\u26a0 ' + err.where + ' failed'));
+  for(const err of specErrors) specsRail.appendChild(el('p','railtip', err.missing
+    ? '\u26a0 ' + err.where + ' is off: ' + err.missing + ' is not installed'
+    : '\u26a0 ' + err.where + ' failed'));
   if(!list.length && !specErrors.length) specsRail.appendChild(el('p','railtip','No open spec issues.'));
   /* One list only when there is nothing to tell apart. */
   if(!mine.length || !watched.length){
