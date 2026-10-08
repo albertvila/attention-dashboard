@@ -417,6 +417,12 @@ def with_changes(view, previous=None, now=None):
     for section, row in _iter_rows(view):
         key = _row_key(row)
         seen.add(key)
+        # A card whose header names its own Jira ticket shows that ticket inline
+        # instead of as a child, so the diff counts it as seen: it is still on
+        # screen, and a header that moved must not report it as dropped work.
+        inline = (row.get("jira") or "").rsplit("/", 1)[-1]
+        if inline:
+            seen.add(inline)
         row["section"] = section
         was = old.get(key)
         if was is None:

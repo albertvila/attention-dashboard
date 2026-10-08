@@ -1247,6 +1247,26 @@ class SnapshotContract(unittest.TestCase):
         # the honest stamp is the closure time, so a reader can still see it is fresh
         self.assertEqual(row["firstSeenAt"], "2026-09-28T14:00:00Z")
 
+    def test_a_header_that_moves_leaves_its_ticket_inline_not_gone(self):
+        """The header names its own Jira ticket inline, so the ticket is not a row
+        while it is the header. When another member outranks it the ticket becomes
+        that inline name — still on screen, so it must not be reported gone."""
+        jira = "https://launchmetrics.atlassian.net/browse/RBT-1"
+        ticket = attention._item("JIRA", source="jira", ref="RBT-1", title="ticket",
+                                 states=["to-deploy"], times={"updated": "2026-09-29T08:00:00Z"})
+        pr = attention._item("MY PR", container="o/r", ref="r#7", title="pr", jira=jira,
+                             states=["waiting"], times={"updated": "2026-09-29T09:00:00Z"})
+        before = attention.payload(attention.build_view([ticket, pr], now=NOW), now=NOW)
+        card = before["tiers"][1]["items"][0]
+        self.assertEqual(card["ref"], "RBT-1")                    # the ticket leads
+        self.assertEqual([c["ref"] for c in card["children"]], ["r#7"])
+        failed = dict(pr, states=["ci-failing"])
+        after = attention.payload(attention.build_view([ticket, failed], now=NOW),
+                                  previous=before, now=NOW)
+        self.assertEqual(after["tiers"][0]["items"][0]["ref"], "r#7")   # the PR now leads
+        self.assertEqual([c["ref"] for c in after["tiers"][0]["items"][0]["children"]], [])
+        self.assertEqual(after["changes"]["gone"], [])
+
     def test_rows_carry_their_section(self):
         view = self.view([self.item(1, "waiting")])
         snapshot = attention.payload(view, now=NOW)
