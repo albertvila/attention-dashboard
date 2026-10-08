@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
 # Every file this script reads or serves lives next to it.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1005,6 +1005,11 @@ class CliError(RuntimeError):
         super().__init__(output)
 
 
+STALK_TEAMS = (("DataCollection", "squad-platform"), ("DEN", "team-payments"))
+STALK_BOTS = {"bit-github-lm", "lm-sec-github", "lm-qinfei", "maxlaunchmetrics"}
+STALK_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+
+
 class Cli:
     """The one seam every CLI call crosses: text, JSON and GraphQL alike.
     Production uses LIVE; a test injects a recorded adapter, so a whole
@@ -1024,6 +1029,20 @@ class Cli:
 
 
 LIVE = Cli()
+
+
+class AsThem(Cli):
+    """The same reads, as someone else's GitHub login. Jira and mail stay
+    out: those tools are authenticated as the person running this process."""
+
+    def __init__(self, login, inner=None):
+        self.login = login
+        self.inner = inner or LIVE
+
+    def text(self, command, args):
+        if command in ("twg", "gmcli"):
+            raise CliError(command, "skipped — not their Jira or mail")
+        return self.inner.text(command, [a.replace("@me", self.login) for a in args])
 
 
 def collect_view(me=None, cli=None):
@@ -1517,6 +1536,43 @@ def _error(where, exc):
     return entry
 
 
+_TEAM = None
+
+
+def team_members():
+    """DataCollection and Team DEN, bots left out. Not part of the snapshot."""
+    global _TEAM
+    if _TEAM is not None:
+        return _TEAM
+    people = {}
+    for label, slug in STALK_TEAMS:
+        for member in LIVE.json("gh", ["api", f"orgs/Launchmetrics/teams/{slug}/members"]):
+            login = member.get("login") or ""
+            if not login or login in STALK_BOTS:
+                continue
+            person = people.setdefault(login, {"login": login, "name": login, "teams": []})
+            if label not in person["teams"]:
+                person["teams"].append(label)
+    for login, person in people.items():
+        try:
+            user = LIVE.json("gh", ["api", f"users/{login}"])
+            person["name"] = user.get("name") or login
+        except CliError:
+            pass
+    _TEAM = sorted(people.values(), key=lambda p: p["name"].lower())
+    return _TEAM
+
+
+def their_queue(login):
+    """One teammate's GitHub queue, computed now and not written down."""
+    if not STALK_LOGIN.match(login or ""):
+        return {"error": "bad login"}
+    view = collect_view(me=login, cli=AsThem(login))
+    view["errors"] = [e for e in view.get("errors") or []
+                       if "skipped" not in (e.get("output") or "")]
+    return view
+
+
 # --- HTTP -------------------------------------------------------------------
 
 DASHBOARD = os.path.join(HERE, "dashboard.html")
@@ -1561,6 +1617,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_file(REFERENCE, "text/html; charset=utf-8")
         elif path == "/refresh":
             self.send_json(refresh())
+        elif path == "/team":
+            self.send_json(team_members())
+        elif path == "/queue":
+            login = (parse_qs(self.path.split("?", 1)[-1]).get("login") or [""])[0]
+            self.send_json(their_queue(login))
         else:
             self.send_error(404)
 

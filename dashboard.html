@@ -41,6 +41,15 @@ main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
 #app{min-width:0}
 .rail{position:sticky;top:120px;border:1px solid #30363d;border-radius:8px;padding:12px 14px;background:#0d1117}
 .rail h2{margin:0 0 4px}
+.team{margin-top:14px;padding-top:10px;border-top:1px solid #30363d;display:flex;flex-direction:column;gap:4px}
+.teammate{display:flex;gap:6px;align-items:center;width:100%;text-align:left;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:3px 8px 3px 3px;cursor:pointer;font:inherit;font-size:12px}
+.teammate.on{border-color:#d29922;color:#e3b341}
+.teammate img{width:20px;height:20px;border-radius:50%;background:#30363d}
+body.viewing #specs{display:none}
+body.viewing main{grid-template-columns:minmax(0,1fr) 262px}
+body.viewing #sessions > :not(.team){display:none}
+.viewing-banner{color:#e3b341;font-size:13px;margin:8px 0 0}
+.viewing-banner button{background:transparent;color:#79c0ff;border:0;padding:0;cursor:pointer;font:inherit}
 .railtip{margin:0 0 8px;color:#8b949e;font-size:11.5px;line-height:1.4}
 a.spec{display:flex;gap:7px;align-items:flex-start;padding:8px 0;border-top:1px solid #21262d;text-decoration:none;color:#e6edf3}
 a.spec:hover .spectitle{text-decoration:underline}
@@ -214,6 +223,8 @@ const sentence = document.getElementById('sentence');
 /* The rules live in attention-view.js: this page only renders what the overlay
    hands it. */
 const SEEN_KEY = 'gha.seenAt';
+const viewing = (() => { try { return new URLSearchParams(location.search).get('user') || ''; } catch(e) { return ''; } })();
+if(viewing) document.body.classList.add('viewing');
 /* A look at a snapshot older than this refreshes it, live collection and all,
    and the header says the rule from this same number, so they cannot drift. */
 const STALE_MS = 60 * 60 * 1000;
@@ -232,7 +243,7 @@ let snap = null, refreshing = false, looking = false;
    STALE_MS refreshes it instead. Focus is one trigger; a visible page also
    sweeps, so a tab left open on a screen does not rot while you watch it. */
 function stampSeen(){
-  if(document.visibilityState !== 'visible' || !snap) return;
+  if(viewing || document.visibilityState !== 'visible' || !snap) return;
   try { localStorage.setItem(SEEN_KEY, snap.generatedAt); } catch(e) {}
 }
 function look(){
@@ -247,11 +258,15 @@ async function load(isRefresh){
   if(isRefresh) refreshing = true;
   stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
   try{
-    const res = await fetch(isRefresh ? '/refresh' : '/api/queue', {cache:'no-store'});
+    const queueUrl = viewing
+      ? '/queue?login=' + encodeURIComponent(viewing)
+      : (isRefresh ? '/refresh' : '/api/queue');
+    const res = await fetch(queueUrl, {cache:'no-store'});
     const data = await res.json();
     const [snaps, acksRes, statusRes, sessionRes, specRes] = await Promise.all([
       fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'}),
-      fetch('/sessions', {cache:'no-store'}), fetch('/specs', {cache:'no-store'})]);
+      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/sessions', {cache:'no-store'}),
+      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'})]);
     snoozes = await snaps.json().catch(() => ({}));
     acks = await acksRes.json().catch(() => ({}));
     status = await statusRes.json().catch(() => null);
@@ -267,7 +282,18 @@ async function load(isRefresh){
     /* The Briefing opens with the sentence; the snapshot's own stamp stays
        underneath it. */
     day.textContent = new Date(data.generatedAt).toLocaleDateString([], {weekday:'long', day:'numeric', month:'long'});
-    sentence.textContent = view.summaryText();
+    sentence.textContent = viewing ? (viewing + ' \u00b7 ' + view.summaryText()) : view.summaryText();
+    const banner = document.getElementById('viewing');
+    if(banner) banner.remove();
+    if(viewing){
+      const note = el('p', 'viewing-banner');
+      note.id = 'viewing';
+      note.appendChild(document.createTextNode('Viewing ' + viewing + ' \u00b7 GitHub queue only \u00b7 '));
+      const back = el('button', null, 'back to you');
+      back.onclick = () => { location.search = ''; };
+      note.appendChild(back);
+      sentence.parentNode.insertBefore(note, sentence);
+    }
     stamp.textContent = 'snapshot ' + ageOf(data.generatedAt)
       + ((data.producer || {}).code ? ' · producer ' + data.producer.code : '')
       + ' · refreshes itself on focus or on a visible sweep once it is over ' + STALE_LABEL + ' old';
@@ -467,9 +493,37 @@ function paintSessions(){
     + repos.reduce((n, [, live]) => n + live.length, 0)));
   sessionsRail.appendChild(el('p','railtip','Agent sessions open right now, one box per repository: green while an agent works, amber blocked, grey merely open. A card whose repository is here is being worked on.'));
   for(const e of sessionErrors) sessionsRail.appendChild(el('p','railtip','\u26a0 ' + e.where + ' failed'));
-  if(!repos.length && !sessionErrors.length) sessionsRail.appendChild(el('p','railtip','No session open right now.'));
-  for(const [repo, live] of repos) sessionsRail.appendChild(sessionBox(repo, live));
+  if(!viewing && !repos.length && !sessionErrors.length) sessionsRail.appendChild(el('p','railtip','No session open right now.'));
+  if(!viewing) for(const [repo, live] of repos) sessionsRail.appendChild(sessionBox(repo, live));
+  paintTeam();
 }
+
+let team = [];
+function paintTeam(){
+  const old = sessionsRail.querySelector('.team');
+  if(old) old.remove();
+  const box = el('div', 'team');
+  box.appendChild(el('h2', null, 'Team'));
+  const you = el('button', 'teammate' + (viewing ? '' : ' on'), 'You');
+  you.onclick = () => { location.search = ''; };
+  box.appendChild(you);
+  for(const p of team){
+    const b = el('button', 'teammate' + (p.login === viewing ? ' on' : ''));
+    const img = document.createElement('img');
+    img.alt = ''; img.src = 'https://github.com/' + encodeURIComponent(p.login) + '.png?size=64';
+    b.appendChild(img);
+    b.appendChild(document.createTextNode(p.name.split(' ')[0]));
+    b.title = p.name;
+    b.onclick = () => {
+      const u = new URL(location.href);
+      u.searchParams.set('user', p.login);
+      location.href = u;
+    };
+    box.appendChild(b);
+  }
+  sessionsRail.appendChild(box);
+}
+fetch('/team', {cache:'no-store'}).then(r => r.json()).then(d => { team = Array.isArray(d) ? d : []; paintTeam(); }).catch(() => {});
 
 /* The specs rail: issues with the spec label that nobody has taken, waiting for
    nobody — mine, plus everyone's in the repos config.json names. Those are two

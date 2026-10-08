@@ -893,6 +893,22 @@ class OpenSessions(unittest.TestCase):
                 "author": {"login": author} if author else None,
                 "repository": {"nameWithOwner": repo}}
 
+    def test_a_teammate_read_uses_their_login_and_skips_jira_and_mail(self):
+        seen = []
+
+        class Rec:
+            def text(self, command, args):
+                seen.append([command] + list(args))
+                return "{}"
+
+        cli = attention.AsThem("teammate-one", inner=Rec())
+        self.assertEqual(cli.text("gh", ["search", "issues", "--assignee=@me"]), "{}")
+        self.assertEqual(seen[-1], ["gh", "search", "issues", "--assignee=teammate-one"])
+        with self.assertRaises(attention.CliError):
+            cli.text("twg", ["jira"])
+        with self.assertRaises(attention.CliError):
+            cli.text("gmcli", ["x"])
+
     def test_a_tool_this_machine_lacks_is_not_a_failure(self):
         """A missing CLI is a source that is off here: named for the work sources,
         and simply nothing to show for the session rails — herdr and bb are this
