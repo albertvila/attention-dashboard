@@ -256,7 +256,7 @@ function look(){
 async function load(isRefresh){
   if(isRefresh && refreshing) return;
   if(isRefresh) refreshing = true;
-  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~10s…' : 'loading…';
+  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~5s…' : 'loading…';
   try{
     const queueUrl = viewing
       ? '/queue?login=' + encodeURIComponent(viewing)

@@ -33,7 +33,7 @@ python3 attention.py                        # server on http://127.0.0.1:8765
 ```
 
 No snapshot exists on the first run, so the first page load cold-starts one
-collection (~10s) before it renders; every read after that is instant and
+collection (~5s) before it renders; every read after that is instant and
 file-backed. Nothing else has to be running — the page refreshes itself whenever
 the snapshot it is showing is over an hour old.
 
@@ -402,7 +402,7 @@ from `attention-view.js`.
 - It opens with the day and the rules' summary sentence — what is new, changed
   and dropped since your last look (`gha.seenAt`) — with the snapshot age and
   the producer stamp underneath, and the refresh rule after them: a snapshot
-  older than an hour refreshes itself (live collection, ~10s) when the page takes
+  older than an hour refreshes itself (live collection, ~5s) when the page takes
   focus — opening the tab, switching back to it — and, while the tab is visible,
   on a five-minute sweep, so a page left open on a screen does not rot. A hidden
   tab records nothing and collects nothing.

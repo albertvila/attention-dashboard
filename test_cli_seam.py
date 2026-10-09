@@ -29,23 +29,24 @@ ME = FIXTURES["me"]
 # with different arguments is a different recorded command.
 PR_SEARCH = "number,title,repository,author,createdAt,updatedAt,isDraft,url,labels"
 ISSUE_SEARCH = "number,title,repository,createdAt,updatedAt,url,commentsCount,labels"
-PR_VIEW = ("number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updatedAt,createdAt,"
-           "headRefName,author,labels,closingIssuesReferences,body")
-ISSUE_VIEW = "number,title,url,body,updatedAt,createdAt,comments,labels"
 
 # A GraphQL `search(type: ISSUE)` query keys on the search it asks for, with its
 # `closed:>=` date normalized — the producer reads that date from its own clock.
+# The Jira batch keys on `key in (…)` alone: which cards asked for which key is
+# what the view assertions below pin, not the recording.
 SEARCH = re.compile(r'search\(type: ISSUE.*?query: "([^"]*)"')
+IN_KEYS = re.compile(r"key in \([^)]*\)")
 CLOSED_DATE = re.compile(r"closed:>=\d{4}-\d{2}-\d{2}")
 CLOSED_ANY = "closed:>=<date>"
 
 
 def key(command, args):
-    """The recording's key for one invocation: exact args, except a search
-    query keys on its normalized search alone, so a different search still
-    raises."""
+    """The recording's key for one invocation: exact args, except the two
+    commands whose arguments are computed — a search keys on its normalized
+    search alone, and the Jira batch on its key list alone."""
     keys = []
     for arg in args:
+        arg = IN_KEYS.sub("key in (<keys>)", arg)
         search = SEARCH.search(arg)
         keys.append(CLOSED_DATE.sub(CLOSED_ANY, search.group(1)) if search else arg)
     return (command, tuple(keys))
@@ -80,18 +81,73 @@ def gh(args, payload):
     return answer("gh", args, payload)
 
 
-def review_threads_query(owner, name, num):
-    return (f'query {{ repository(owner:"{owner}", name:"{name}") {{ pullRequest(number:{num}) {{ '
-            'reviewThreads(first:50) { nodes { isResolved comments(last:1) { nodes { author { login } body } } } }'
-            ' } } }')
+# One batched read is one aliased query. The aliasing is written out here, so a
+# ref the producer stops asking about — or starts asking differently — is a
+# different recorded command and raises; the field lists come from the producer,
+# so this file pins the shape of the read, not its newest field.
+def batch_query(refs, selection, field="pullRequest"):
+    parts = []
+    for i, (repo, number) in enumerate(refs):
+        owner, name = repo.split("/")
+        parts.append(f'n{i}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) '
+                     f'{{ {field}(number:{number}) {{ {selection} }} }}')
+    return "query { " + " ".join(parts) + " }"
 
 
-def issue_links_query(owner, name, num):
-    return (f'query {{ repository(owner:"{owner}", name:"{name}") {{ issue(number:{num}) {{ '
-            'closedByPullRequestsReferences(first:10) { nodes { number state title url } } '
-            'parent { number state title url } '
-            'subIssues(first:50) { nodes { number state title url } }'
-            ' } } }')
+def refs_of(rows):
+    return [(row["repository"]["nameWithOwner"], row["number"]) for row in rows]
+
+
+def card_key(row):
+    return f'{row["repository"]["nameWithOwner"]}#{row["number"]}'
+
+
+CHECKS_IN_FLIGHT = {"COMPLETED", "IN_PROGRESS", "PENDING", "QUEUED", "REQUESTED", "WAITING"}
+
+
+def check_node(check):
+    """gh's `pr checks --json name,state` row -> the rollup context it came from:
+    a run still going reports a status, a finished one its conclusion."""
+    state = check.get("state") or ""
+    if state in CHECKS_IN_FLIGHT:
+        return {"__typename": "CheckRun", "name": check.get("name", ""), "status": state,
+                "conclusion": None}
+    return {"__typename": "CheckRun", "name": check.get("name", ""), "status": "COMPLETED",
+            "conclusion": state}
+
+
+def pr_node(view, checks, threads):
+    """The fixture's own pr view + pr checks + reviewThreads, in the one shape
+    the batched query answers with."""
+    return {
+        "number": view["number"], "title": view["title"], "isDraft": view.get("isDraft"),
+        "reviewDecision": view.get("reviewDecision"), "mergeStateStatus": view.get("mergeStateStatus"),
+        "state": view.get("state"), "url": view["url"], "updatedAt": view.get("updatedAt"),
+        "createdAt": view.get("createdAt"), "headRefName": view.get("headRefName"),
+        "body": view.get("body"), "author": view.get("author") or {},
+        "labels": {"nodes": [{"name": l.get("name"), "color": l.get("color")}
+                             for l in view.get("labels") or []]},
+        "closingIssuesReferences": {"nodes": view.get("closingIssuesReferences") or []},
+        "statusCheckRollup": {"contexts": {"nodes": [check_node(c) for c in checks or []]}},
+        "reviewThreads": (threads or {}).get("reviewThreads") or {"nodes": []},
+    }
+
+
+def issue_node(view, links):
+    """The fixture's own issue view + linked PRs, in the one shape the batched
+    query answers with."""
+    return {
+        "number": view["number"], "title": view["title"], "url": view["url"], "body": view.get("body"),
+        "updatedAt": view.get("updatedAt"), "createdAt": view.get("createdAt"),
+        "labels": {"nodes": [{"name": l.get("name"), "color": l.get("color")}
+                             for l in view.get("labels") or []]},
+        "comments": {"nodes": [{"author": c.get("author") or {}, "body": c.get("body")}
+                               for c in view.get("comments") or []]},
+        "parent": (links or {}).get("parent"),
+        "subIssues": (links or {}).get("subIssues") or {"nodes": []},
+        "closedByPullRequestsReferences": (links or {}).get("closedByPullRequestsReferences", None)
+                                          or {"nodes": []},
+    }
 
 
 def jira_row(key, summary, status="In Progress", category="In Progress"):
@@ -129,41 +185,40 @@ def fixture_recording(drop=()):
     rows = FIXTURES["search_review_requested"]
     calls.append(gh(["search", "prs", f"user-review-requested:{ME}", "--state=open",
                      "--json", PR_SEARCH, "--limit", "100"], rows))
-    for row in rows:
-        repo, num = row["repository"]["nameWithOwner"], row["number"]
-        calls.append(gh(["pr", "view", str(num), "--repo", repo, "--json",
-                         "headRefName,closingIssuesReferences"],
-                        {"headRefName": row.get("headRefName"), "closingIssuesReferences": None}))
+    calls.append(gh(["api", "graphql", "-f",
+                     "query=" + batch_query(refs_of(rows), attention._REVIEW_SELECTION)],
+                    {"data": {f"n{i}": {"pullRequest": {"headRefName": row.get("headRefName"),
+                                                        "closingIssuesReferences": {"nodes": []}}}
+                              for i, row in enumerate(rows)}}))
 
     rows = FIXTURES["search_author"]
     calls.append(gh(["search", "prs", "--author=@me", "--state=open",
                      "--json", PR_SEARCH, "--limit", "100"], rows))
-    for row in rows:
-        repo, num = row["repository"]["nameWithOwner"], row["number"]
-        key = f"{repo}#{num}"
-        calls.append(gh(["pr", "view", str(num), "--repo", repo, "--json", PR_VIEW],
-                        FIXTURES["pr_view"][key]))
-        calls.append(gh(["pr", "checks", str(num), "--repo", repo, "--json", "name,state"],
-                        FIXTURES["pr_checks"][key]))
-        calls.append(gh(["api", "graphql", "-f",
-                         "query=" + review_threads_query(*repo.split("/"), num)],
-                        {"data": {"repository": {"pullRequest": FIXTURES["pr_review_threads"][key]}}}))
+    calls.append(gh(["api", "graphql", "-f",
+                     "query=" + batch_query(refs_of(rows), attention._PR_SELECTION)],
+                    {"data": {f"n{i}": {"pullRequest": pr_node(FIXTURES["pr_view"][card_key(row)],
+                                                               FIXTURES["pr_checks"].get(card_key(row)),
+                                                               FIXTURES["pr_review_threads"].get(card_key(row)))}
+                              for i, row in enumerate(rows)}}))
 
     rows = FIXTURES["search_assignee"]
     calls.append(gh(["search", "issues", "--assignee=@me", "--state=open",
                      "--json", ISSUE_SEARCH, "--limit", "100"], rows))
-    for row in rows:
-        repo, num = row["repository"]["nameWithOwner"], row["number"]
-        key = f"{repo}#{num}"
-        calls.append(gh(["issue", "view", str(num), "--repo", repo, "--json", ISSUE_VIEW],
-                        FIXTURES["issue_view"][key]))
-        calls.append(gh(["api", "graphql", "-f",
-                         "query=" + issue_links_query(*repo.split("/"), num)],
-                        {"data": {"repository": {"issue": FIXTURES["issue_linked_prs"][key]}}}))
+    calls.append(gh(["api", "graphql", "-f",
+                     "query=" + batch_query(refs_of(rows), attention._ISSUE_SELECTION, field="issue")],
+                    {"data": {f"n{i}": {"issue": issue_node(FIXTURES["issue_view"][card_key(row)],
+                                                              FIXTURES["issue_linked_prs"].get(card_key(row)))}
+                              for i, row in enumerate(rows)}}))
 
-    for key in ("BIT-9001", "RBT-9001", "FIRE-9001"):
-        calls.append(answer("twg", ["jira", "workitem", "get", key, "--output", "json",
-                                    "--output-summary", "none"], {"data": [jira_row(key, f"{key} ticket")]}))
+    # One JQL `key in (…)` answers every key the cards ask for, and leaves out
+    # the one that does not exist (a guessed token in a title), which is how a
+    # wrong guess unlinks. Its key list is normalized in `key()` above.
+    jira_keys = ["BIT-9001", "BIT-9002", "FIRE-9001", "RBT-9001"]
+    calls.append(answer("twg", ["jira", "workitem", "query",
+                                "--jql", "key in (%s)" % ", ".join(jira_keys),
+                                "--limit", "100", "--fields", attention.JIRA_FIELDS,
+                                "--output", "json", "--output-summary", "none"],
+                        {"data": [jira_row(k, f"{k} ticket") for k in jira_keys if k != "BIT-9002"]}))
     calls.append(answer("twg", ["jira", "workitem", "query", "--jql", attention.JIRA_JQL,
                                 "--limit", "100", "--fields", attention.JIRA_FIELDS,
                                 "--output", "json", "--output-summary", "none"], {"data": JIRA_OPEN}))
@@ -273,14 +328,32 @@ class CollectionFromARecording(unittest.TestCase):
         self.assertEqual([f["label"] for f in found["acme/checkout-api#334"][1]["facts"]],
                          ["approved", "checks green", "mergeable"])
 
-    def test_a_card_keeps_collecting_when_its_own_checks_are_unrecorded(self):
-        view = self.collect(drop=("gh pr checks 334 --repo acme/checkout-api",))
-        self.assertEqual([e["where"] for e in view["errors"]], ["checkout-api#334"])
+    def test_a_batched_read_failing_costs_only_its_own_source(self):
+        """One call now serves a whole source, so one broken call costs that
+        source — and every other source still lands."""
+        view = self.collect(drop=(attention._PR_SELECTION[:40],))
+        self.assertEqual([e["where"] for e in view["errors"]], ["my PRs"])
         found = cards(view)
-        self.assertEqual([f["label"] for f in found["acme/checkout-api#334"][1]["facts"]],
-                         ["approved", "no checks", "mergeable"])
-        self.assertEqual([f["label"] for f in found["acme/checkout-api#335"][1]["facts"]],
-                         ["awaiting review", "checks green", "merge blocked"])
+        self.assertNotIn("MY PR", {row["chip"] for _, row in found.values()})
+        self.assertIn("ISSUE", {row["chip"] for _, row in found.values()})
+        self.assertIn("acme/checkout-api#332", found)
+
+    def test_a_card_left_out_of_an_answer_costs_only_that_card(self):
+        """A ref the answer does not carry is that card's own read coming back
+        empty, the way it was when every card was asked for separately: the rest
+        of the source still lands, and nothing is reported as broken."""
+        calls = []
+        for call in fixture_recording():
+            if "pullRequest(number:1933)" in " ".join(call["command"]):
+                payload = json.loads(call["stdout"])
+                payload["data"].pop("n2")                    # the third PR answers nothing
+                call = dict(call, stdout=json.dumps(payload))
+            calls.append(call)
+        view = attention.collect_view(cli=Recorded(calls))
+        found = cards(view)
+        self.assertEqual(view["errors"], [])
+        self.assertNotIn("acme/web-frontend#1933", found)
+        self.assertIn("acme/checkout-api#334", found)
 
 
 class TheSeam(unittest.TestCase):

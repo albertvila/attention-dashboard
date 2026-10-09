@@ -1067,16 +1067,17 @@ class Cli:
 LIVE = Cli()
 
 # A read is its own process on a network round trip, and waiting for each in turn
-# was the whole cost of a refresh: seventy-odd calls a second each, one after
-# another, a minute of nothing. `map` walks the rows in order whatever order the
-# answers land in, so the view never depends on who answers first.
-# Measured on this machine: the same refresh takes 10-12s with 8 in flight, 7-8s
-# with 16, and no better with 24 — past 16 the calls slow each other down.
+# was the whole cost of a refresh: seventy-odd of them, a second each, one after
+# another, a minute of nothing. The sources and their cards now share one read
+# each, and `map` walks the rows in order whatever order the answers land in, so
+# the view never depends on who answers first.
 CLI_IN_FLIGHT = 16
 # One budget for every read in the process, not one per pool: the pools nest (a
 # source runs its per-card reads inside the pool of sources, the page asks for
-# its rails while a refresh is still going), and what has to stay bounded is the
-# number of CLI processes, not the number of threads waiting on them.
+# its rails while a refresh is still going, and a teammate's queue is a whole
+# refresh of its own), and what has to stay bounded is the number of CLI
+# processes, not the number of threads waiting on them. Measured while a refresh
+# was seventy calls: 10-12s with 8 in flight, 7-8s with 16, no better with 24.
 CLI_SLOTS = threading.Semaphore(CLI_IN_FLIGHT)
 
 
@@ -1126,71 +1127,56 @@ def collect_view(me=None, cli=None):
     me = me or _whoami(gh)
 
     def review_requests(errors):
-        """What other people are waiting on me for: the search, then one read
-        per card for the branch name and the issues it closes."""
+        """What other people are waiting on me for: the search, then one query
+        for the branch name and the issues each one closes."""
         found, bots = [], 0
         try:
             # user-review-requested, not review-requested: the latter also matches
             # team requests (a team you're in was asked), which is not your queue.
             rows = gh(["search", "prs", f"user-review-requested:{me or '@me'}", "--state=open",
                        "--json", PR_FIELDS, "--limit", "100"])
-
-            def review_info(row):
-                try:
-                    info = gh(["pr", "view", str(row["number"]),
-                               "--repo", row["repository"]["nameWithOwner"],
-                               "--json", "headRefName,closingIssuesReferences"])
-                    row["headRefName"] = info.get("headRefName")
-                    row["closingIssuesReferences"] = info.get("closingIssuesReferences")
-                except Exception as e:
-                    errors.append(_error(_key(row), e))
-            _each(review_info, rows)
+            query, keys = _graphql_for(rows, _REVIEW_SELECTION)
+            answers = _answers(cli, query, keys)
+            for row in rows:
+                node = answers.get(_key(row))
+                if node:
+                    row["headRefName"] = node.get("headRefName")
+                    row["closingIssuesReferences"] = (node.get("closingIssuesReferences") or {}).get("nodes")
             found, bots = items_from_review_search(rows)
         except Exception as e:
             errors.append(_error("review requests", e))
         return found, bots
 
     def my_prs(errors):
-        """Mine, and how each one is doing: its view, its checks, its threads."""
+        """Mine, and how each one is doing: its view, its checks, its threads —
+        one query for all of them, not three calls a card."""
         found = []
         try:
             rows = gh(["search", "prs", "--author=@me", "--state=open", "--json", PR_FIELDS, "--limit", "100"])
+            query, keys = _graphql_for(rows, _PR_SELECTION)
+            answers = _answers(cli, query, keys)
             views, checks, threads = {}, {}, {}
-
-            def one_pr(row):
-                key = _key(row)
-                repo, num = row["repository"]["nameWithOwner"], row["number"]
-                try:
-                    views[key] = gh(["pr", "view", str(num), "--repo", repo, "--json",
-                                     "number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updatedAt,createdAt,"
-                                     "headRefName,author,labels,closingIssuesReferences,body"])
-                    checks[key] = _pr_checks(gh, repo, num)
-                    threads[key] = _review_threads(cli, repo, num)
-                except Exception as e:
-                    errors.append(_error(f"{_ref(repo, num)}", e))
-            _each(one_pr, rows)
+            for key, node in answers.items():
+                views[key] = _pr_view(node)
+                checks[key] = _checks_of(node)
+                threads[key] = node            # the threads ride in the node itself
             found = items_from_own_prs(rows, views, checks, threads, me)
         except Exception as e:
             errors.append(_error("my PRs", e))
         return found, 0
 
     def assigned_issues(errors):
-        """Issues on me: the issue itself, and what would close it."""
+        """Issues on me: the issue itself and what would close it, in the same
+        one query."""
         found = []
         try:
             rows = gh(["search", "issues", "--assignee=@me", "--state=open", "--json", ISSUE_FIELDS, "--limit", "100"])
+            query, keys = _graphql_for(rows, _ISSUE_SELECTION, field="issue")
+            answers = _answers(cli, query, keys, field="issue")
             views, linked = {}, {}
-
-            def one_issue(row):
-                key = _key(row)
-                repo, num = row["repository"]["nameWithOwner"], row["number"]
-                try:
-                    views[key] = gh(["issue", "view", str(num), "--repo", repo, "--json",
-                                     "number,title,url,body,updatedAt,createdAt,comments,labels"])
-                    linked[key] = _issue_links(cli, repo, num)
-                except Exception as e:
-                    errors.append(_error(f"{_ref(repo, num)}", e))
-            _each(one_issue, rows)
+            for key, node in answers.items():
+                views[key] = _issue_view(node)
+                linked[key] = node             # parent, sub-issues, closing PRs
             found = items_from_issues(rows, views, linked, me)
         except Exception as e:
             errors.append(_error("assigned issues", e))
@@ -1243,7 +1229,7 @@ def collect_view(me=None, cli=None):
 
     # closed items too: a card that is still live keeps the PR that finished it
     # as a struck child, and only a cluster that is all closed heads with one.
-    _with_jira(items + closed, errors, fetch=partial(_jira_issue, cli))
+    _with_jira(items + closed, errors, fetch=partial(_jira_issues, cli))
     return build_view(items, hidden_bots=hidden, errors=errors, now=now, closed=closed)
 
 
@@ -1600,28 +1586,27 @@ def _collect_closed(cli, me, now, errors):
 
 
 def _with_jira(items, errors, fetch):
-    """Attach the Jira ticket behind each item's link; one twg call per key,
-    all of them at once. A key that does not resolve is not a link: mail
-    subjects and snippets carry bare KEY-123 tokens, and so do PR titles
-    (UTF-8 / SHA-256 match that shape). Both are guesses, and a guess that
-    misses unlinks without a word."""
-    cache, failures, reported = {}, {}, set()
+    """Attach the Jira ticket behind each item's link: one query for every key
+    the queue names, not one call each. A key that does not resolve is not a
+    link: mail subjects and snippets carry bare KEY-123 tokens, and so do PR
+    titles (UTF-8 / SHA-256 match that shape). Both are guesses, and a guess
+    that misses unlinks without a word."""
     keys = []
     for item in items:
         url = item.get("jira")
-        if not url:
-            continue
-        key = url.rsplit("/", 1)[-1]
-        if key not in keys:
-            keys.append(key)
+        if url:
+            key = url.rsplit("/", 1)[-1]
+            if key not in keys:
+                keys.append(key)
 
-    def one(key):
+    cache, failure = {}, None
+    if keys:
         try:
-            cache[key] = fetch(key)
+            cache = fetch(keys)
         except Exception as e:
-            failures[key] = e
-    _each(one, keys)
+            failure = e
 
+    reported = set()
     for item in items:
         url = item.get("jira")
         if not url:
@@ -1629,29 +1614,36 @@ def _with_jira(items, errors, fetch):
         key = url.rsplit("/", 1)[-1]
         if cache.get(key):
             item["jira_issue"] = cache[key]
-        elif key in failures:
+        else:
             if item.get("source") == "mail" or item.get("jira_guess"):
                 item["jira"] = ""
             elif key not in reported:
                 reported.add(key)
                 # An absent twg is one error — the source's own — not one per key:
                 # the queue's own warnings must not bury what the queue holds.
-                if not _absent(failures[key]):
-                    errors.append(_error(f"jira {key}", failures[key]))
+                exc = failure or CliError("twg jira workitem query", f"no ticket {key} in the answer")
+                if not _absent(exc):
+                    errors.append(_error(f"jira {key}", exc))
     return items
 
 
-def _jira_issue(cli, key):
-    """twg jira workitem get -> the few fields the dashboard shows."""
-    item = cli.json("twg", ["jira", "workitem", "get", key, "--output", "json",
-                            "--output-summary", "none"])["data"][0]
-    status = item.get("status") or {}
-    return {
-        "summary": item.get("summary", ""),
-        "status": status.get("name", ""),
-        "status_category": (status.get("statusCategory") or {}).get("name", ""),
-        "type": (item.get("issuetype") or {}).get("name", ""),
-    }
+def _jira_issues(cli, keys):
+    """Every linked ticket in one query, with the fields `get` would have
+    returned for each. JQL's `key in (…)` quietly leaves out a key that does not
+    exist, which is exactly how one wrong guess is supposed to read."""
+    data = cli.json("twg", ["jira", "workitem", "query", "--jql", "key in (%s)" % ", ".join(keys),
+                            "--limit", "100", "--fields", JIRA_FIELDS,
+                            "--output", "json", "--output-summary", "none"])["data"]
+    out = {}
+    for item in data["issues"] if isinstance(data, dict) else data:
+        status = item.get("status") or {}
+        out[item["key"]] = {
+            "summary": item.get("summary", ""),
+            "status": status.get("name", ""),
+            "status_category": (status.get("statusCategory") or {}).get("name", ""),
+            "type": (item.get("issuetype") or {}).get("name", ""),
+        }
+    return out
 
 
 def _whoami(gh):
@@ -1661,32 +1653,92 @@ def _whoami(gh):
         return ""
 
 
-def _pr_checks(gh, repo, num):
-    """gh pr checks exits 1 on 'no checks reported' — a normal state, not an error."""
-    try:
-        return gh(["pr", "checks", str(num), "--repo", repo, "--json", "name,state"])
-    except CliError as e:
-        if "no checks reported" in e.output:
-            return []
-        raise
+def _graphql_for(rows, selection, field="pullRequest"):
+    """One aliased query reading `selection` from the PR/issue each row names —
+    the aliases are `n0`, `n1`, … A per-card read is a process on a network round
+    trip, so N of them is N round trips; one query with N aliases is one.
+    Returns (query, keys) keyed by `_key(row)`, which is how the answer is handed
+    back to the card that asked, so the two cannot be written differently."""
+    parts, keys = [], []
+    for i, row in enumerate(rows):
+        repo, number = row["repository"]["nameWithOwner"], row["number"]
+        owner, _, name = repo.partition("/")
+        parts.append(f'n{i}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) '
+                     f'{{ {field}(number:{int(number)}) {{ {selection} }} }}')
+        keys.append(_key(row))
+    return "query { " + " ".join(parts) + " }", keys
 
 
-def _review_threads(cli, repo, num):
-    owner, name = repo.split("/")
-    query = (f'query {{ repository(owner:"{owner}", name:"{name}") {{ pullRequest(number:{num}) {{ '
-             'reviewThreads(first:50) { nodes { isResolved comments(last:1) { nodes { author { login } body } } } }'
-             ' } } }')
-    return cli.graphql(query)["data"]["repository"]["pullRequest"]
+def _answers(cli, query, keys, field="pullRequest"):
+    """{key: node} for a batched answer. A ref the query did not answer for is
+    simply absent, the way that card's own read failing used to be."""
+    if not keys:
+        return {}
+    data = (cli.graphql(query) or {}).get("data") or {}
+    out = {}
+    for i, key in enumerate(keys):
+        node = (data.get("n%d" % i) or {}).get(field)
+        if node:
+            out[key] = node
+    return out
 
 
-def _issue_links(cli, repo, num):
-    owner, name = repo.split("/")
-    query = (f'query {{ repository(owner:"{owner}", name:"{name}") {{ issue(number:{num}) {{ '
-             'closedByPullRequestsReferences(first:10) { nodes { number state title url } } '
-             'parent { number state title url } '
-             'subIssues(first:50) { nodes { number state title url } }'
-             ' } } }')
-    return cli.graphql(query)["data"]["repository"]["issue"]
+# The connections the view model reads as lists, and the checks it reads as
+# {name, state} — one selection serves the view, the checks and the threads, so
+# one call serves a whole source. `closingIssuesReferences` carries owner and
+# name because `_github_links` reads them off the ref.
+_PR_SELECTION = (
+    "number title isDraft reviewDecision mergeStateStatus state url updatedAt createdAt headRefName body "
+    "author { login } labels(first:20) { nodes { name color } } "
+    "closingIssuesReferences(first:10) { nodes { number repository { nameWithOwner owner { login } name } } } "
+    "statusCheckRollup { contexts(first:100) { nodes { __typename "
+    "... on CheckRun { name status conclusion } ... on StatusContext { context state } } } } "
+    "reviewThreads(first:50) { nodes { isResolved comments(last:1) { nodes { author { login } body } } } }")
+_REVIEW_SELECTION = ("headRefName "
+                     "closingIssuesReferences(first:10) "
+                     "{ nodes { number repository { nameWithOwner owner { login } name } } }")
+_ISSUE_SELECTION = (
+    "number title url body updatedAt createdAt labels(first:20) { nodes { name color } } "
+    "parent { number state title url } "
+    "subIssues(first:50) { nodes { number state title url } } "
+    "closedByPullRequestsReferences(first:10) { nodes { number state title url } } "
+    # the last hundred: the ball being in your court is always at the end, and
+    # the written links a card is built from are in the body or the recent ones.
+    "comments(last:100) { nodes { author { login } body } }")
+
+
+def _checks_of(node):
+    """statusCheckRollup -> the {name, state} shape the states already read. A
+    check still running reports its status, a finished one its conclusion, which
+    is what `gh pr checks` said too."""
+    out, rollup = [], node.get("statusCheckRollup") or {}
+    for ctx in (rollup.get("contexts") or {}).get("nodes") or []:
+        if ctx.get("__typename") == "CheckRun":
+            out.append({"name": ctx.get("name", ""),
+                        "state": ctx.get("conclusion") or ctx.get("status") or ""})
+        else:
+            out.append({"name": ctx.get("context", ""), "state": ctx.get("state") or ""})
+    return out
+
+
+def _pr_view(node):
+    """A batched pullRequest -> what `gh pr view --json …` gave the view model:
+    the connections flattened, everything else as it arrives."""
+    view = dict(node)
+    view["labels"] = (node.get("labels") or {}).get("nodes") or []
+    view["closingIssuesReferences"] = (node.get("closingIssuesReferences") or {}).get("nodes") or []
+    return view
+
+
+def _issue_view(node):
+    """A batched issue -> what `gh issue view --json …` gave the view model."""
+    return {
+        "number": node.get("number"), "title": node.get("title", ""), "url": node.get("url", ""),
+        "body": node.get("body"), "updatedAt": node.get("updatedAt"), "createdAt": node.get("createdAt"),
+        "labels": (node.get("labels") or {}).get("nodes") or [],
+        "comments": [{"author": c.get("author") or {}, "body": c.get("body")}
+                     for c in (node.get("comments") or {}).get("nodes") or []],
+    }
 
 
 def _absent(exc):
@@ -1779,7 +1831,7 @@ REFERENCE = os.path.join(HERE, "reference.html")
 
 class Server(ThreadingHTTPServer):
     """A reader that goes away mid-request — a page reload, a tab closed, a fetch
-    aborted during a ~20s refresh — is a dropped connection, not a stack trace on
+    aborted during a refresh — is a dropped connection, not a stack trace on
     the console. Everything else still reports as usual."""
 
     def handle_error(self, request, client_address):

@@ -232,12 +232,13 @@ class JiraEnrichment(unittest.TestCase):
                  attention._item("", ref="r#3", states=["ready"])]
         calls = []
 
-        def fetch(key):
-            calls.append(key)
-            return {"summary": "s", "status": "Open", "status_category": "To Do", "type": "Bug"}
+        def fetch(keys):
+            calls.append(keys)
+            return {k: {"summary": "s", "status": "Open", "status_category": "To Do", "type": "Bug"}
+                    for k in keys if k != "FIRE-9"}
 
         attention._with_jira(items, [], fetch=fetch)
-        self.assertEqual(calls, ["FIRE-1"])
+        self.assertEqual(calls, [["FIRE-1"]])          # every key in one query, the shared one only once
         self.assertEqual(items[0]["jira_issue"]["summary"], "s")
         view = attention.build_view(items, now=NOW)
         # r#1 and r#2 share a Jira key, so they cluster; r#3 stays separate.
@@ -246,17 +247,32 @@ class JiraEnrichment(unittest.TestCase):
         self.assertEqual(header["jira_issue"]["summary"], "s")
         self.assertIsNone(find(view, "r#3")["jira_issue"])
 
-    def test_failure_is_reported_not_fatal(self):
+    def test_a_failure_is_reported_not_fatal(self):
         items = [attention._item("", jira="https://x/browse/FIRE-1")]
         errors = []
 
-        def fetch(key):
-            raise attention.CliError("twg jira workitem get FIRE-1", "not found")
+        def fetch(keys):
+            raise attention.CliError("twg jira workitem query", "not found")
 
         attention._with_jira(items, errors, fetch=fetch)
         self.assertNotIn("jira_issue", items[0])
         self.assertEqual(errors[0]["where"], "jira FIRE-1")
         self.assertEqual(errors[0]["output"], "not found")
+
+    def test_a_key_the_answer_left_out_is_the_key_missing(self):
+        """JQL quietly leaves out a key that does not exist, so nothing about the
+        query failing: that key is the one with no ticket."""
+        guess = attention._item("", source="mail", jira="https://x/browse/UTF-8")
+        errors = []
+        attention._with_jira([guess], errors, fetch=lambda keys: {})
+        self.assertEqual(errors, [])
+        self.assertEqual(guess["jira"], "")             # a guess that misses unlinks, silently
+
+        ticket = attention._item("", ref="r#1", jira="https://x/browse/FIRE-404")
+        attention._with_jira([ticket], errors, fetch=lambda keys: {})
+        self.assertEqual([e["where"] for e in errors], ["jira FIRE-404"])
+        self.assertIn("no ticket FIRE-404", errors[0]["output"])
+        self.assertEqual(ticket["jira"], "https://x/browse/FIRE-404")   # a real card keeps its link
 
 
 class JiraSource(unittest.TestCase):
@@ -732,18 +748,32 @@ class ClosedLog(unittest.TestCase):
 
 
 class CheckParsing(unittest.TestCase):
-    def test_no_checks_reported_is_empty_not_error(self):
-        def gh(args):
-            raise attention.CliError("gh pr checks", "no checks reported on the 'fix/x' branch")
+    """The checks arrive inside the PR read now, one rollup context each, so the
+    only thing left to get wrong is the mapping to the {name, state} the states
+    have always read."""
 
-        self.assertEqual(attention._pr_checks(gh, "o/r", 1), [])
+    ROLLUP = {"statusCheckRollup": {"contexts": {"nodes": [
+        {"__typename": "CheckRun", "name": "unit tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "integration", "status": "IN_PROGRESS", "conclusion": None},
+        {"__typename": "StatusContext", "context": "ci/legacy", "state": "FAILURE"},
+    ]}}}
 
-    def test_other_check_errors_still_raise(self):
-        def gh(args):
-            raise attention.CliError("gh pr checks", "HTTP 500")
+    def test_a_finished_run_reports_its_conclusion_and_a_live_one_its_status(self):
+        self.assertEqual(attention._checks_of(self.ROLLUP), [
+            {"name": "unit tests", "state": "SUCCESS"},
+            {"name": "integration", "state": "IN_PROGRESS"},
+            {"name": "ci/legacy", "state": "FAILURE"},
+        ])
 
-        with self.assertRaises(attention.CliError):
-            attention._pr_checks(gh, "o/r", 1)
+    def test_the_states_read_them_the_way_gh_pr_checks_did(self):
+        checks = attention._checks_of(self.ROLLUP)
+        self.assertEqual([attention._check_state(c) for c in checks], ["green", "pending", "failed"])
+        self.assertEqual(attention._pr_facts({}, checks)[1], {"label": "1 checks failing", "tone": "bad"})
+        self.assertEqual(attention._pr_facts({}, [])[1], {"label": "no checks", "tone": "warn"})
+
+    def test_no_checks_is_no_checks(self):
+        for rollup in ({}, {"statusCheckRollup": None}, {"statusCheckRollup": {"contexts": {"nodes": []}}}):
+            self.assertEqual(attention._checks_of(rollup), [], rollup)
 
 
 class AssignedIssues(unittest.TestCase):
