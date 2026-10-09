@@ -22,7 +22,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from functools import partial
@@ -1088,6 +1090,23 @@ class AsThem(Cli):
         return self.inner.text(command, args)
 
 
+# A per-card read is its own process on a network round trip, and waiting for
+# each in turn was the whole cost of a refresh: eight own PRs is twenty-four
+# calls, a minute of nothing. `map` walks `rows` in order whatever order the
+# answers land in, so the view does not depend on who answers first.
+PER_CARD_WORKERS = 8
+
+
+def _each(fn, rows):
+    """Run one read per row at once. A failure inside `fn` is the caller's to
+    handle — this only decides that the rows do not queue."""
+    rows = list(rows)
+    if not rows:
+        return
+    with ThreadPoolExecutor(max_workers=PER_CARD_WORKERS) as pool:
+        list(pool.map(fn, rows))
+
+
 def collect_view(me=None, cli=None):
     """Run the live queries and build the view model. Read-only."""
     cli = cli or LIVE
@@ -1103,7 +1122,7 @@ def collect_view(me=None, cli=None):
         # team requests (a team you're in was asked), which is not your queue.
         rows = gh(["search", "prs", f"user-review-requested:{me or '@me'}", "--state=open",
                    "--json", PR_FIELDS, "--limit", "100"])
-        for row in rows:
+        def review_info(row):
             try:
                 info = gh(["pr", "view", str(row["number"]),
                            "--repo", row["repository"]["nameWithOwner"],
@@ -1112,6 +1131,7 @@ def collect_view(me=None, cli=None):
                 row["closingIssuesReferences"] = info.get("closingIssuesReferences")
             except Exception as e:
                 errors.append(_error(_key(row), e))
+        _each(review_info, rows)
         got, hidden = items_from_review_search(rows)
         items += got
     except Exception as e:
@@ -1120,7 +1140,7 @@ def collect_view(me=None, cli=None):
     try:
         rows = gh(["search", "prs", "--author=@me", "--state=open", "--json", PR_FIELDS, "--limit", "100"])
         views, checks, threads = {}, {}, {}
-        for row in rows:
+        def one_pr(row):
             key = _key(row)
             repo, num = row["repository"]["nameWithOwner"], row["number"]
             try:
@@ -1131,6 +1151,7 @@ def collect_view(me=None, cli=None):
                 threads[key] = _review_threads(cli, repo, num)
             except Exception as e:
                 errors.append(_error(f"{_ref(repo, num)}", e))
+        _each(one_pr, rows)
         items += items_from_own_prs(rows, views, checks, threads, me)
     except Exception as e:
         errors.append(_error("my PRs", e))
@@ -1138,7 +1159,7 @@ def collect_view(me=None, cli=None):
     try:
         rows = gh(["search", "issues", "--assignee=@me", "--state=open", "--json", ISSUE_FIELDS, "--limit", "100"])
         views, linked = {}, {}
-        for row in rows:
+        def one_issue(row):
             key = _key(row)
             repo, num = row["repository"]["nameWithOwner"], row["number"]
             try:
@@ -1147,6 +1168,7 @@ def collect_view(me=None, cli=None):
                 linked[key] = _issue_links(cli, repo, num)
             except Exception as e:
                 errors.append(_error(f"{_ref(repo, num)}", e))
+        _each(one_issue, rows)
         items += items_from_issues(rows, views, linked, me)
     except Exception as e:
         errors.append(_error("assigned issues", e))
@@ -1212,13 +1234,22 @@ def _read_json(path):
         return {}
 
 
+def _atomic_write(path, text):
+    """Temp file then rename, so a reader sees the old file or the new one and
+    never half of either. `_read_json` treats a torn file as an empty one, which
+    on the snapshot costs the previous diff and a whole cold collection, and on
+    snoozes and acks costs every entry in them. `mkstemp` gives each writer its
+    own temp name: the server and a cron can both write the same file."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=parent, prefix=os.path.basename(path) + ".", suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
 def _write_json(path, data):
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w") as fh:
-        json.dump(data, fh, indent=2, sort_keys=True)
-        fh.write("\n")
+    _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 def load_snoozes(path=None, now=None):
@@ -1443,11 +1474,7 @@ def load_previous(path):
 
 def write_snapshot(snapshot, path):
     """The one writer: every surface reads this file, refreshes rewrite it."""
-    parent = os.path.dirname(os.path.abspath(path))
-    os.makedirs(parent, exist_ok=True)
-    with open(path, "w") as fh:
-        json.dump(snapshot, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    _atomic_write(path, json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
 
 
 def collect_payload(previous=None):
@@ -1502,21 +1529,33 @@ def _collect_closed(cli, me, now, errors):
 
 
 def _with_jira(items, errors, fetch):
-    """Attach the Jira ticket behind each item's link; one twg call per key.
-    A key that does not resolve is not a link: mail subjects and snippets carry
-    bare KEY-123 tokens, and so do PR titles (UTF-8 / SHA-256 match that shape).
-    Both are guesses, and a guess that misses unlinks without a word."""
+    """Attach the Jira ticket behind each item's link; one twg call per key,
+    all of them at once. A key that does not resolve is not a link: mail
+    subjects and snippets carry bare KEY-123 tokens, and so do PR titles
+    (UTF-8 / SHA-256 match that shape). Both are guesses, and a guess that
+    misses unlinks without a word."""
     cache, failures, reported = {}, {}, set()
+    keys = []
     for item in items:
         url = item.get("jira")
         if not url:
             continue
         key = url.rsplit("/", 1)[-1]
-        if key not in cache and key not in failures:
-            try:
-                cache[key] = fetch(key)
-            except Exception as e:
-                failures[key] = e
+        if key not in keys:
+            keys.append(key)
+
+    def one(key):
+        try:
+            cache[key] = fetch(key)
+        except Exception as e:
+            failures[key] = e
+    _each(one, keys)
+
+    for item in items:
+        url = item.get("jira")
+        if not url:
+            continue
+        key = url.rsplit("/", 1)[-1]
         if cache.get(key):
             item["jira_issue"] = cache[key]
         elif key in failures:
@@ -1615,12 +1654,13 @@ def team_members(config=None):
             person = people.setdefault(login, {"login": login, "name": login, "teams": []})
             if slug not in person["teams"]:
                 person["teams"].append(slug)
-    for login, person in people.items():
+    def face(login):
         try:
             user = LIVE.json("gh", ["api", f"users/{login}"])
-            person["name"] = user.get("name") or login
+            people[login]["name"] = user.get("name") or login
         except CliError:
             pass
+    _each(face, people)
     return sorted(people.values(), key=lambda p: p["name"].lower())
 
 

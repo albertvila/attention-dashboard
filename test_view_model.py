@@ -12,6 +12,7 @@ import io
 import json
 import os
 import tempfile
+import threading
 import unittest
 import contextlib
 from datetime import datetime, timedelta, timezone
@@ -1185,6 +1186,34 @@ class Snoozes(unittest.TestCase):
             self.assertEqual(attention.snooze({}), {"error": "key is required"})
         finally:
             attention.snooze_path = path
+
+
+class TheWriters(unittest.TestCase):
+    """Every write lands whole: the server and a cron can write the same file,
+    and a reader that catches half of one loses what was in it."""
+
+    def test_a_reader_never_catches_half_a_file(self):
+        directory = tempfile.mkdtemp(prefix="atomic-test-")
+        path = os.path.join(directory, "attention.json")
+        stop = threading.Event()
+
+        def writer():
+            while not stop.is_set():
+                attention.write_snapshot({"filler": "x" * 5000}, path)
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        try:
+            for _ in range(300):
+                try:
+                    with open(path) as fh:
+                        json.load(fh)      # a torn file is not JSON and raises here
+                except FileNotFoundError:
+                    pass                   # before the first write has landed
+        finally:
+            stop.set()
+            thread.join()
+        self.assertEqual(sorted(os.listdir(directory)), ["attention.json"])
 
 
 class MailSource(unittest.TestCase):

@@ -16,6 +16,7 @@ committed.
 
 import json
 import re
+import threading
 import unittest
 from pathlib import Path
 
@@ -299,6 +300,23 @@ class TheSeam(unittest.TestCase):
             cli.json("gh", args)
         self.assertEqual(caught.exception.command, "gh pr checks 1 --repo o/r --json name,state")
         self.assertEqual(caught.exception.output, "no checks reported on the 'fix/x' branch")
+
+
+class ThePerCardPool(unittest.TestCase):
+    """A refresh is one round trip per card; this is what makes them cost one."""
+
+    def test_the_rows_do_not_queue(self):
+        # A barrier only clears with all PER_CARD_WORKERS rows in flight at
+        # once: read them one at a time and the first wait times out.
+        barrier = threading.Barrier(attention.PER_CARD_WORKERS, timeout=5)
+        seen = []
+
+        def read(row):
+            barrier.wait()
+            seen.append(row)
+
+        attention._each(read, range(attention.PER_CARD_WORKERS))
+        self.assertEqual(sorted(seen), list(range(attention.PER_CARD_WORKERS)))
 
 
 if __name__ == "__main__":
