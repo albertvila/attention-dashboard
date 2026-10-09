@@ -1087,9 +1087,12 @@ class OpenSessions(unittest.TestCase):
                          ["acme/shared-lib#10", "acme/checkout-api#7"])
         self.assertEqual([i["author"] for i in out["issues"]], ["albertvila", "djo19"])
         self.assertEqual([i["watched"] for i in out["issues"]], [False, True])
-        self.assertIn("--author=@me", cli.calls[0])
-        self.assertNotIn("--author=@me", cli.calls[1])
-        self.assertEqual(cli.calls[1][cli.calls[1].index("--repo") + 1], "acme/checkout-api")
+        # The two searches run at once, so which answers first is not the test:
+        # each asks for what it should, and mine still wins the merge above.
+        by_me = next(c for c in cli.calls if "--author=@me" in c)
+        by_repo = next(c for c in cli.calls if "--repo" in c)
+        self.assertNotIn("--author=@me", by_repo)
+        self.assertEqual(by_repo[by_repo.index("--repo") + 1], "acme/checkout-api")
         self.assertEqual(out["errors"], [])
 
     def test_a_watched_repo_never_lists_the_same_spec_twice(self):

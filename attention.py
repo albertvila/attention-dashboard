@@ -1051,7 +1051,8 @@ class Cli:
     collection can run without touching the live tools."""
 
     def text(self, command, args):
-        proc = subprocess.run([command] + args, capture_output=True, text=True)
+        with CLI_SLOTS:
+            proc = subprocess.run([command] + args, capture_output=True, text=True)
         if proc.returncode != 0:
             raise CliError(command + " " + " ".join(args), (proc.stderr or proc.stdout).strip())
         return proc.stdout
@@ -1064,6 +1065,30 @@ class Cli:
 
 
 LIVE = Cli()
+
+# A read is its own process on a network round trip, and waiting for each in turn
+# was the whole cost of a refresh: seventy-odd calls a second each, one after
+# another, a minute of nothing. `map` walks the rows in order whatever order the
+# answers land in, so the view never depends on who answers first.
+# Measured on this machine: the same refresh takes 10-12s with 8 in flight, 7-8s
+# with 16, and no better with 24 — past 16 the calls slow each other down.
+CLI_IN_FLIGHT = 16
+# One budget for every read in the process, not one per pool: the pools nest (a
+# source runs its per-card reads inside the pool of sources, the page asks for
+# its rails while a refresh is still going), and what has to stay bounded is the
+# number of CLI processes, not the number of threads waiting on them.
+CLI_SLOTS = threading.Semaphore(CLI_IN_FLIGHT)
+
+
+def _each(fn, rows):
+    """Run one read per row at once, in the order of `rows`. A failure inside
+    `fn` is the caller's to handle — this only decides that the rows do not
+    queue."""
+    rows = list(rows)
+    if not rows:
+        return []
+    with ThreadPoolExecutor(max_workers=min(CLI_IN_FLIGHT, len(rows))) as pool:
+        return list(pool.map(fn, rows))
 
 
 class AsThem(Cli):
@@ -1090,23 +1115,6 @@ class AsThem(Cli):
         return self.inner.text(command, args)
 
 
-# A per-card read is its own process on a network round trip, and waiting for
-# each in turn was the whole cost of a refresh: eight own PRs is twenty-four
-# calls, a minute of nothing. `map` walks `rows` in order whatever order the
-# answers land in, so the view does not depend on who answers first.
-PER_CARD_WORKERS = 8
-
-
-def _each(fn, rows):
-    """Run one read per row at once. A failure inside `fn` is the caller's to
-    handle — this only decides that the rows do not queue."""
-    rows = list(rows)
-    if not rows:
-        return
-    with ThreadPoolExecutor(max_workers=PER_CARD_WORKERS) as pool:
-        list(pool.map(fn, rows))
-
-
 def collect_view(me=None, cli=None):
     """Run the live queries and build the view model. Read-only."""
     cli = cli or LIVE
@@ -1117,78 +1125,121 @@ def collect_view(me=None, cli=None):
     gh = partial(cli.json, "gh")
     me = me or _whoami(gh)
 
-    try:
-        # user-review-requested, not review-requested: the latter also matches
-        # team requests (a team you're in was asked), which is not your queue.
-        rows = gh(["search", "prs", f"user-review-requested:{me or '@me'}", "--state=open",
-                   "--json", PR_FIELDS, "--limit", "100"])
-        def review_info(row):
-            try:
-                info = gh(["pr", "view", str(row["number"]),
-                           "--repo", row["repository"]["nameWithOwner"],
-                           "--json", "headRefName,closingIssuesReferences"])
-                row["headRefName"] = info.get("headRefName")
-                row["closingIssuesReferences"] = info.get("closingIssuesReferences")
-            except Exception as e:
-                errors.append(_error(_key(row), e))
-        _each(review_info, rows)
-        got, hidden = items_from_review_search(rows)
-        items += got
-    except Exception as e:
-        errors.append(_error("review requests", e))
+    def review_requests(errors):
+        """What other people are waiting on me for: the search, then one read
+        per card for the branch name and the issues it closes."""
+        found, bots = [], 0
+        try:
+            # user-review-requested, not review-requested: the latter also matches
+            # team requests (a team you're in was asked), which is not your queue.
+            rows = gh(["search", "prs", f"user-review-requested:{me or '@me'}", "--state=open",
+                       "--json", PR_FIELDS, "--limit", "100"])
 
-    try:
-        rows = gh(["search", "prs", "--author=@me", "--state=open", "--json", PR_FIELDS, "--limit", "100"])
-        views, checks, threads = {}, {}, {}
-        def one_pr(row):
-            key = _key(row)
-            repo, num = row["repository"]["nameWithOwner"], row["number"]
-            try:
-                views[key] = gh(["pr", "view", str(num), "--repo", repo, "--json",
-                                 "number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updatedAt,createdAt,"
-                                 "headRefName,author,labels,closingIssuesReferences,body"])
-                checks[key] = _pr_checks(gh, repo, num)
-                threads[key] = _review_threads(cli, repo, num)
-            except Exception as e:
-                errors.append(_error(f"{_ref(repo, num)}", e))
-        _each(one_pr, rows)
-        items += items_from_own_prs(rows, views, checks, threads, me)
-    except Exception as e:
-        errors.append(_error("my PRs", e))
+            def review_info(row):
+                try:
+                    info = gh(["pr", "view", str(row["number"]),
+                               "--repo", row["repository"]["nameWithOwner"],
+                               "--json", "headRefName,closingIssuesReferences"])
+                    row["headRefName"] = info.get("headRefName")
+                    row["closingIssuesReferences"] = info.get("closingIssuesReferences")
+                except Exception as e:
+                    errors.append(_error(_key(row), e))
+            _each(review_info, rows)
+            found, bots = items_from_review_search(rows)
+        except Exception as e:
+            errors.append(_error("review requests", e))
+        return found, bots
 
-    try:
-        rows = gh(["search", "issues", "--assignee=@me", "--state=open", "--json", ISSUE_FIELDS, "--limit", "100"])
-        views, linked = {}, {}
-        def one_issue(row):
-            key = _key(row)
-            repo, num = row["repository"]["nameWithOwner"], row["number"]
-            try:
-                views[key] = gh(["issue", "view", str(num), "--repo", repo, "--json",
-                                 "number,title,url,body,updatedAt,createdAt,comments,labels"])
-                linked[key] = _issue_links(cli, repo, num)
-            except Exception as e:
-                errors.append(_error(f"{_ref(repo, num)}", e))
-        _each(one_issue, rows)
-        items += items_from_issues(rows, views, linked, me)
-    except Exception as e:
-        errors.append(_error("assigned issues", e))
+    def my_prs(errors):
+        """Mine, and how each one is doing: its view, its checks, its threads."""
+        found = []
+        try:
+            rows = gh(["search", "prs", "--author=@me", "--state=open", "--json", PR_FIELDS, "--limit", "100"])
+            views, checks, threads = {}, {}, {}
 
-    try:
-        data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_JQL, "--limit", "100",
-                                "--fields", JIRA_FIELDS,
-                                "--output", "json", "--output-summary", "none"])["data"]
-        items += items_from_jira(data["issues"] if isinstance(data, dict) else data)
-    except Exception as e:
-        errors.append(_error("jira tasks", e))
+            def one_pr(row):
+                key = _key(row)
+                repo, num = row["repository"]["nameWithOwner"], row["number"]
+                try:
+                    views[key] = gh(["pr", "view", str(num), "--repo", repo, "--json",
+                                     "number,title,isDraft,reviewDecision,mergeStateStatus,state,url,updatedAt,createdAt,"
+                                     "headRefName,author,labels,closingIssuesReferences,body"])
+                    checks[key] = _pr_checks(gh, repo, num)
+                    threads[key] = _review_threads(cli, repo, num)
+                except Exception as e:
+                    errors.append(_error(f"{_ref(repo, num)}", e))
+            _each(one_pr, rows)
+            found = items_from_own_prs(rows, views, checks, threads, me)
+        except Exception as e:
+            errors.append(_error("my PRs", e))
+        return found, 0
 
-    try:
-        threads = cli.json("gmcli", [MAIL_ACCOUNT, "search", MAIL_QUERY,
-                                      "--max", str(MAIL_MAX), "--json"]).get("threads") or []
-        items += items_from_mail(threads, _mail_groups(errors, cli.text))
-    except Exception as e:
-        errors.append(_error("mail", e))
+    def assigned_issues(errors):
+        """Issues on me: the issue itself, and what would close it."""
+        found = []
+        try:
+            rows = gh(["search", "issues", "--assignee=@me", "--state=open", "--json", ISSUE_FIELDS, "--limit", "100"])
+            views, linked = {}, {}
 
-    closed = _collect_closed(cli, me, now, errors)
+            def one_issue(row):
+                key = _key(row)
+                repo, num = row["repository"]["nameWithOwner"], row["number"]
+                try:
+                    views[key] = gh(["issue", "view", str(num), "--repo", repo, "--json",
+                                     "number,title,url,body,updatedAt,createdAt,comments,labels"])
+                    linked[key] = _issue_links(cli, repo, num)
+                except Exception as e:
+                    errors.append(_error(f"{_ref(repo, num)}", e))
+            _each(one_issue, rows)
+            found = items_from_issues(rows, views, linked, me)
+        except Exception as e:
+            errors.append(_error("assigned issues", e))
+        return found, 0
+
+    def jira_tasks(errors):
+        """Every ticket assigned to me, open or waiting on a deploy."""
+        found = []
+        try:
+            data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_JQL, "--limit", "100",
+                                    "--fields", JIRA_FIELDS,
+                                    "--output", "json", "--output-summary", "none"])["data"]
+            found = items_from_jira(data["issues"] if isinstance(data, dict) else data)
+        except Exception as e:
+            errors.append(_error("jira tasks", e))
+        return found, 0
+
+    def mail(errors):
+        """Starred threads, with the group/ labels that merge them."""
+        found = []
+        try:
+            threads = cli.json("gmcli", [MAIL_ACCOUNT, "search", MAIL_QUERY,
+                                          "--max", str(MAIL_MAX), "--json"]).get("threads") or []
+            found = items_from_mail(threads, _mail_groups(errors, cli.text))
+        except Exception as e:
+            errors.append(_error("mail", e))
+        return found, 0
+
+    def closed_window(errors):
+        """Work that finished recently: a live card keeps its closed members."""
+        return _collect_closed(cli, me, now, errors), 0
+
+    def source(read):
+        """One source's read with an error list of its own — the sources run at
+        once, so they cannot share the producer's — and the merge above walks
+        them in source order, so neither the errors nor the view depend on who
+        answers first."""
+        errors = []
+        found, bots = read(errors)
+        return found, bots, errors
+
+    sources = [review_requests, my_prs, assigned_issues, jira_tasks, mail, closed_window]
+    reads = _each(source, sources)
+    errors, items, hidden = [], [], 0
+    for found, bots, block_errors in reads:
+        items += found
+        hidden += bots
+        errors += block_errors
+    closed = reads[-1][0]          # closed_window: finished work, a lane of its own
 
     # closed items too: a card that is still live keeps the PR that finished it
     # as a struck child, and only a cluster that is all closed heads with one.
@@ -1386,13 +1437,17 @@ def spec_issues(cli=None, config=None):
     searches += [(["search", "issues", "--repo", repo, "--label=spec"],
                   f"spec issues ({repo})", True) for repo in spec_repos(config)]
     issues, errors, seen = [], [], set()
-    for args, where, watched in searches:
+
+    def read(search):
+        args, where, watched = search
         try:
-            found = cli.json("gh", args + ["--state=open", "--limit", "40",
-                                            "--json", SPEC_FIELDS])
+            return cli.json("gh", args + ["--state=open", "--limit", "40",
+                                            "--json", SPEC_FIELDS]), watched, []
         except Exception as e:
-            errors.append(_error(where, e))
-            continue
+            return [], watched, [_error(where, e)]
+
+    for found, watched, block_errors in _each(read, searches):
+        errors += block_errors
         for i in found:
             if i.get("assignees"):
                 continue
@@ -1485,11 +1540,12 @@ def collect_payload(previous=None):
 def _collect_closed(cli, me, now, errors):
     """Items closed/merged in the last CLOSED_MEMORY_HOURS, across all sources —
     wider than the lane shows, so a card that is still live keeps its closed
-    members. GraphQL search: one call per source, and it carries the issue/PR links."""
+    members. Four independent reads, so they go at once; GraphQL search carries
+    the issue/PR links, so each is a single call."""
     since = (now - timedelta(hours=CLOSED_MEMORY_HOURS)).strftime("%Y-%m-%d")
     who = me or "@me"
-    closed, seen = [], set()
-    for qualifier, chip in (("author", "MY PR"), ("reviewed-by", "REVIEWED")):
+
+    def read_prs(qualifier, chip):
         query = ('{ search(type: ISSUE, first: 100, query: "is:pr is:closed %s:%s closed:>=%s") { nodes { '
                  '... on PullRequest { number title url state closedAt headRefName createdAt updatedAt body '
                  'author { login } labels(first:20) { nodes { name color } } repository { nameWithOwner } '
@@ -1498,33 +1554,48 @@ def _collect_closed(cli, me, now, errors):
         try:
             nodes = cli.graphql(query)["data"]["search"]["nodes"]
         except Exception as e:
-            errors.append(_error(f"closed PRs ({chip})", e))
-            continue
-        for node in nodes:
-            key = f'{node["repository"]["nameWithOwner"]}#{node["number"]}'
-            if key in seen or not _within_window(node.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS):
+            return [], [_error(f"closed PRs ({chip})", e)]
+        return [_closed_pr_item(n, chip) for n in nodes
+                if _within_window(n.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS)], []
+
+    def read_issues():
+        query = ('{ search(type: ISSUE, first: 100, query: "is:issue is:closed assignee:%s closed:>=%s") { nodes { '
+                 '... on Issue { number title url body closedAt createdAt updatedAt '
+                 'labels(first:20) { nodes { name color } } repository { nameWithOwner } '
+                 'parent { number repository { nameWithOwner } } '
+                 'subIssues(first:50) { nodes { number repository { nameWithOwner } } } '
+                 'closedByPullRequestsReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
+                 ) % (who, since)
+        try:
+            nodes = cli.graphql(query)["data"]["search"]["nodes"]
+        except Exception as e:
+            return [], [_error("closed issues", e)]
+        return [_closed_issue_item(n) for n in nodes
+                if _within_window(n.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS)], []
+
+    def read_jira():
+        try:
+            data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_CLOSED_JQL, "--limit", "100",
+                                    "--fields", JIRA_CLOSED_FIELDS,
+                                    "--output", "json", "--output-summary", "none"])["data"]
+        except Exception as e:
+            return [], [_error("jira closed", e)]
+        return items_from_jira_closed(data["issues"] if isinstance(data, dict) else data), []
+
+    reads = [partial(read_prs, "author", "MY PR"), partial(read_prs, "reviewed-by", "REVIEWED"),
+             read_issues, read_jira]
+    closed, seen = [], set()
+    for found, block_errors in _each(lambda read: read(), reads):
+        errors += block_errors
+        for item in found:
+            # One PR both authored and reviewed by me is one row, and the author
+            # read comes first. GitHub numbers issues and PRs in one sequence,
+            # so no other pair can collide.
+            key = _item_key(item)
+            if key in seen:
                 continue
             seen.add(key)
-            closed.append(_closed_pr_item(node, chip))
-    query = ('{ search(type: ISSUE, first: 100, query: "is:issue is:closed assignee:%s closed:>=%s") { nodes { '
-             '... on Issue { number title url body closedAt createdAt updatedAt '
-             'labels(first:20) { nodes { name color } } repository { nameWithOwner } '
-             'parent { number repository { nameWithOwner } } '
-             'subIssues(first:50) { nodes { number repository { nameWithOwner } } } '
-             'closedByPullRequestsReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
-             ) % (who, since)
-    try:
-        nodes = cli.graphql(query)["data"]["search"]["nodes"]
-        closed += [_closed_issue_item(n) for n in nodes if _within_window(n.get("closedAt"), now, hours=CLOSED_MEMORY_HOURS)]
-    except Exception as e:
-        errors.append(_error("closed issues", e))
-    try:
-        data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_CLOSED_JQL, "--limit", "100",
-                                "--fields", JIRA_CLOSED_FIELDS,
-                                "--output", "json", "--output-summary", "none"])["data"]
-        closed += items_from_jira_closed(data["issues"] if isinstance(data, dict) else data)
-    except Exception as e:
-        errors.append(_error("jira closed", e))
+            closed.append(item)
     return closed
 
 

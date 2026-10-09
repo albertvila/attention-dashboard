@@ -258,18 +258,22 @@ function look(){
 async function load(isRefresh){
   if(isRefresh && refreshing) return;
   if(isRefresh) refreshing = true;
-  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~20s…' : 'loading…';
+  stamp.textContent = isRefresh ? 'refreshing — live gh/twg collection, ~10s…' : 'loading…';
   try{
     const queueUrl = viewing
       ? '/queue?login=' + encodeURIComponent(viewing)
       : (isRefresh ? '/refresh' : '/api/queue');
-    const res = await fetch(queueUrl, {cache:'no-store'});
-    const data = await res.json();
-    const [snaps, acksRes, statusRes, sessionRes, specRes, teamRes] = await Promise.all([
+    /* Every read goes out in one wave. On a refresh the queue read is a live
+       collection, and the rails used to wait for it to be over before they had
+       even started. `/team` is the one that stays out of the gate: the roster
+       only fills the Team box, so the board is not held up for it. */
+    const teamRes = fetch('/team', {cache:'no-store'});
+    const [res, snaps, acksRes, statusRes, sessionRes, specRes] = await Promise.all([
+      fetch(queueUrl, {cache:'no-store'}),
       fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'}),
       viewing ? Promise.resolve({json: async () => ({})}) : fetch('/sessions', {cache:'no-store'}),
-      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'}),
-      fetch('/team', {cache:'no-store'})]);
+      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'})]);
+    const data = await res.json();
     snoozes = await snaps.json().catch(() => ({}));
     acks = await acksRes.json().catch(() => ({}));
     status = await statusRes.json().catch(() => null);
@@ -281,9 +285,12 @@ async function load(isRefresh){
     specs = backlog.issues || []; specErrors = backlog.errors || [];
     /* Who is on the teams you listed, and whether the switch is even on: read
        with the rest of the live state, so flipping it in config.json lands on
-       the next look rather than the next page load. */
-    const roster = await teamRes.json().catch(() => []);
-    team = Array.isArray(roster) ? roster : [];
+       the next look rather than the next page load. It only paints the Team
+       box, so it lands when it lands. */
+    teamRes.then(r => r.json()).catch(() => []).then(roster => {
+      team = Array.isArray(roster) ? roster : [];
+      paintTeam();
+    });
     snap = data;
     view = AttentionView.overlay(data, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
     render(data);

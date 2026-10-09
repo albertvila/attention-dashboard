@@ -306,17 +306,17 @@ class ThePerCardPool(unittest.TestCase):
     """A refresh is one round trip per card; this is what makes them cost one."""
 
     def test_the_rows_do_not_queue(self):
-        # A barrier only clears with all PER_CARD_WORKERS rows in flight at
-        # once: read them one at a time and the first wait times out.
-        barrier = threading.Barrier(attention.PER_CARD_WORKERS, timeout=5)
+        # A barrier only clears with all CLI_IN_FLIGHT rows in flight at once:
+        # read them one at a time and the first wait times out.
+        barrier = threading.Barrier(attention.CLI_IN_FLIGHT, timeout=5)
         seen = []
 
         def read(row):
             barrier.wait()
             seen.append(row)
 
-        attention._each(read, range(attention.PER_CARD_WORKERS))
-        self.assertEqual(sorted(seen), list(range(attention.PER_CARD_WORKERS)))
+        attention._each(read, range(attention.CLI_IN_FLIGHT))
+        self.assertEqual(sorted(seen), list(range(attention.CLI_IN_FLIGHT)))
 
 
 if __name__ == "__main__":
