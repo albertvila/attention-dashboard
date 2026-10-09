@@ -197,6 +197,16 @@
       return `${c.new} new · ${c.changed} changed · ${c.gone} dropped ${when}`;
     }
 
+    /** The rows that moved since your last look, in the order a surface renders
+        them — the jump list under the sentence. A card that is only new is not
+        here: it is already on screen where it belongs, and a jump to it would
+        be a jump to nowhere. */
+    function changedRows() {
+      const all = tiers.flatMap(t => t.rows)
+        .concat(folds.mail, folds.support, folds.parked, folds.drafts, folds.closed);
+      return all.filter(r => { const f = flagOf(r, since); return f && f.kind === 'moved'; });
+    }
+
     const formatWhen = iso => 'until ' + new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
     const changeLabel = f => f.kind === 'new' ? 'new' : f.kind === 'gone' ? 'dropped' : (f.label || 'changed');
     // a move out of the needs tier reads green; into it, amber.
@@ -208,7 +218,7 @@
       snoozeOf, ackOf, parked, specs,
       flag: row => flagOf(row, since),
       closed: isClosed,
-      tiers, folds, notes, nextCard, counts, summaryText, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
+      tiers, folds, notes, nextCard, counts, summaryText, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
         { value: '24', label: '1 day' },

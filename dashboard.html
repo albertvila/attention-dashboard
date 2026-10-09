@@ -30,6 +30,8 @@ button:hover{background:#30363d}
 .sub{margin:0;color:#8b949e;font-size:12px}
 #jumped{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 #jumped button{font-size:11px;padding:1px 8px;color:#d29922;border-color:#d2992255;background:transparent}
+#jumped .jump-open{font-size:11px;padding:1px 7px;color:#d29922;border:1px solid #d2992255;border-radius:6px;text-decoration:none}
+#jumped .jump-open:hover{border-color:#d29922;background:#d2992211}
 main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
   grid-template-columns:250px minmax(0,1fr) 262px;gap:26px;align-items:start}
 /* Three columns wherever three fit: specs on the left (browse material — no
@@ -382,17 +384,22 @@ function render(data){
   paintSessions();
   const jumped = document.getElementById('jumped');
   jumped.innerHTML = '';
-  const rows = view.tiers.flatMap(t => t.rows).concat(
-    view.folds.mail, view.folds.support, view.folds.parked, view.folds.drafts, view.folds.closed);
-  for(const r of rows){
-    const f = view.flag(r);
-    if(!f || f.kind !== 'moved') continue;
-    const b = el('button', null, (r.ref || r.title) + ' · ' + view.changeLabel(f));
+  for(const r of view.changedRows()){
+    const b = el('button', null, (r.ref || r.title) + ' · ' + view.changeLabel(view.flag(r)));
     b.onclick = () => {
       const hit = document.querySelector('[data-key="' + CSS.escape(r.key) + '"]');
       if(hit) hit.scrollIntoView({block: 'center'});
     };
     jumped.appendChild(b);
+    /* The card it points at is not always where the work is: a link opens the
+       ticket, the issue or the PR itself. */
+    if(r.url){
+      const open = el('a', 'jump-open', '\u2197');
+      open.href = r.url; open.target = '_blank'; open.rel = 'noreferrer';
+      open.title = 'open ' + (r.ref || r.title);
+      open.setAttribute('aria-label', open.title);
+      jumped.appendChild(open);
+    }
   }
   restore(saved);
 }

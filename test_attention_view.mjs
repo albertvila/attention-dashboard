@@ -138,6 +138,21 @@ assert.deepEqual(view.folds.parked, []);                           // it moved: 
 assert.equal(view.tiers[2].count, 1);
 assert.equal(view.flag(view.tiers[2].rows[0]).kind, 'moved');
 
+// --- the jump list: what moved, in render order, folds included ----------------
+assert.deepEqual(view.changedRows().map(r => r.key), ['FIRE-1']);   // moved, and only moved
+view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [row({ key: 'N1', firstSeenAt: '2026-10-02T11:30:00.000Z' })] },
+                              { key: 'ready', title: 'r', items: [] },
+                              { key: 'waiting', title: 'w', items: [row({ key: 'M1', lastChangedAt: '2026-10-02T11:30:00.000Z',
+                                                                         lastChange: { kind: 'moved', label: 'waiting \u2192 CI failing', to_tier: 'needs' } })] }] }),
+               { now: NOW });
+assert.deepEqual(view.changedRows().map(r => r.key), ['M1']);       // a new card is not a jump target
+const parkedMoved = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
+                                            { key: 'waiting', title: 'w', items: [row({ key: 'P1', lastChangedAt: '2026-10-02T11:30:00.000Z',
+                                                                                       lastChange: { kind: 'moved', label: 'moved' } })] }] }),
+                             { snoozes: { P1: '2026-10-03T12:00:00.000Z' }, now: NOW });
+assert.deepEqual(parkedMoved.folds.parked.map(r => r.key), ['P1']);
+assert.deepEqual(parkedMoved.changedRows().map(r => r.key), ['P1']);  // a parked move still jumps
+
 // --- one Parked fold for both kinds ----------------------------------------
 // A snooze parks until a time, an ack parks until the card moves: same fold,
 // no tier, and the row still says which kind it is under.
