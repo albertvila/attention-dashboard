@@ -263,10 +263,11 @@ async function load(isRefresh){
       : (isRefresh ? '/refresh' : '/api/queue');
     const res = await fetch(queueUrl, {cache:'no-store'});
     const data = await res.json();
-    const [snaps, acksRes, statusRes, sessionRes, specRes] = await Promise.all([
+    const [snaps, acksRes, statusRes, sessionRes, specRes, teamRes] = await Promise.all([
       fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'}),
       viewing ? Promise.resolve({json: async () => ({})}) : fetch('/sessions', {cache:'no-store'}),
-      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'})]);
+      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'}),
+      fetch('/team', {cache:'no-store'})]);
     snoozes = await snaps.json().catch(() => ({}));
     acks = await acksRes.json().catch(() => ({}));
     status = await statusRes.json().catch(() => null);
@@ -276,6 +277,11 @@ async function load(isRefresh){
     sessions = live.repos || {}; sessionErrors = live.errors || [];
     const backlog = await specRes.json().catch(() => ({}));
     specs = backlog.issues || []; specErrors = backlog.errors || [];
+    /* Who is on the teams you listed, and whether the switch is even on: read
+       with the rest of the live state, so flipping it in config.json lands on
+       the next look rather than the next page load. */
+    const roster = await teamRes.json().catch(() => []);
+    team = Array.isArray(roster) ? roster : [];
     snap = data;
     view = AttentionView.overlay(data, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
     render(data);
@@ -524,7 +530,6 @@ function paintTeam(){
   }
   sessionsRail.appendChild(box);
 }
-fetch('/team', {cache:'no-store'}).then(r => r.json()).then(d => { team = Array.isArray(d) ? d : []; paintTeam(); }).catch(() => {});
 
 /* The specs rail: issues with the spec label that nobody has taken, waiting for
    nobody — mine, plus everyone's in the repos config.json names. Those are two
