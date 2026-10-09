@@ -73,14 +73,16 @@ class ReviewRequests(unittest.TestCase):
         self.assertEqual(row["age"], "5d")
         self.assertTrue(row["url"].startswith("https://github.com/"))
 
-    def test_review_row_carries_author_and_jira_from_branch(self):
+    def test_review_row_carries_author_and_jira_from_branch_or_title(self):
         view, _ = build()
         row = find(view, "web-frontend#2018")
         self.assertEqual(row["author"], "lm-qinfei")
         self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/BIT-9001")
         self.assertEqual(row["container"], "acme/web-frontend")
-        row = find(view, "web-frontend#2017")
-        self.assertEqual(row["jira"], "")
+        # no key in the branch: the bare key in the title names the ticket
+        self.assertIn("BIT-9002", find(view, "web-frontend#2017")["title"])
+        self.assertEqual(find(view, "web-frontend#2017")["jira"],
+                         "https://launchmetrics.atlassian.net/browse/BIT-9002")
 
     def test_labels_are_normalized(self):
         rows = [{"number": 1, "title": "t", "url": "u", "isDraft": False,
@@ -117,6 +119,46 @@ class OwnPRs(unittest.TestCase):
         self.assertEqual(row["labels"], [])
         row = find(view, "web-frontend#1933")
         self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9001")
+
+    def test_a_pr_title_key_links_as_a_guess(self):
+        """A PR whose branch has no key and whose body has no browse URL links
+        from the bare key in its title — as a guess, so a guess Jira cannot
+        resolve unlinks without a word, while a deliberate link still warns."""
+        view = {"number": 7, "title": "fix: RBT-9005 pick the ES proxy by stage instead of prod",
+                "url": "https://github.com/o/r/pull/7", "author": {"login": "me"},
+                "headRefName": "fix/rbt-1010-es-proxy-stage", "labels": [], "body": "no link here",
+                "isDraft": False, "reviewDecision": "", "mergeStateStatus": "BLOCKED", "state": "OPEN",
+                "closingIssuesReferences": [], "createdAt": "2026-09-29T08:00:00Z",
+                "updatedAt": "2026-09-29T09:00:00Z"}
+        item = attention._pr_item(view, ["waiting"], [], {})
+        self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9005")
+        self.assertTrue(item["jira_guess"])
+        # a key in the branch, or a browse URL in the body, is deliberate instead
+        for deliberate in (dict(view, headRefName="fix/RBT-9005-es-proxy"),
+                           dict(view, body="Ticket: https://launchmetrics.atlassian.net/browse/RBT-9005")):
+            self.assertNotIn("jira_guess", attention._pr_item(deliberate, ["waiting"], [], {}))
+        # the review queue and the closed log follow the same rule
+        self.assertTrue(attention._review_item(
+            {"number": 8, "title": "RBT-9005 review me", "url": "u", "headRefName": "fix/nokey",
+             "repository": {"nameWithOwner": "o/r"}, "author": {"login": "them"}, "labels": []})["jira_guess"])
+        self.assertTrue(attention._closed_pr_item(
+            {"number": 9, "title": "fix: RBT-9005 merged", "url": "u", "state": "MERGED",
+             "closedAt": "2026-09-29T09:00:00Z", "createdAt": "2026-09-01T09:00:00Z",
+             "headRefName": "fix/nokey", "repository": {"nameWithOwner": "o/r"},
+             "author": {"login": "me"}, "labels": {"nodes": []},
+             "closingIssuesReferences": {"nodes": []}}, "MY PR")["jira_guess"])
+
+        def missing(key):
+            raise RuntimeError(f"no such ticket {key}")
+
+        errors = []
+        attention._with_jira([item], errors, fetch=missing)
+        self.assertEqual((item["jira"], errors), ("", []))       # a guess unlinks, silently
+        errors = []
+        attention._with_jira([attention._item("MY PR", ref="o/r#7",
+                                              jira="https://launchmetrics.atlassian.net/browse/RBT-9")],
+                             errors, fetch=missing)
+        self.assertEqual([e["where"] for e in errors], ["jira RBT-9"])   # a link that breaks still says so
 
     def test_draft_goes_to_its_own_section_not_the_tiers(self):
         view, _ = build()
@@ -512,6 +554,19 @@ class ClosedLog(unittest.TestCase):
         item = attention._closed_pr_item(node, "REVIEWED")
         self.assertEqual(item["states"], ["closed"])
         self.assertEqual(item["chip"], "REVIEWED")
+
+    def test_closed_pr_item_links_jira_from_its_body_too(self):
+        """A merged PR whose branch carries no key has the body URL as its only
+        link: the same rule the open read follows, or the card loses its ticket
+        the moment the PR merges."""
+        node = {"number": 2345, "title": "fix: read document deletions gold from the stage catalog",
+                "url": "u", "state": "MERGED", "closedAt": "2026-09-29T09:00:00Z",
+                "createdAt": "2026-09-01T09:00:00Z", "headRefName": "fix/stage-dependent-document-deletions",
+                "body": "Summary.\n\nTicket: https://launchmetrics.atlassian.net/browse/RBT-9005",
+                "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
+                "labels": {"nodes": []}, "closingIssuesReferences": {"nodes": []}}
+        self.assertEqual(attention._closed_pr_item(node, "MY PR")["jira"],
+                         "https://launchmetrics.atlassian.net/browse/RBT-9005")
 
     def test_closed_issue_item_links_parent_subissues_and_prs(self):
         node = {"number": 2, "title": "t", "url": "u", "closedAt": "2026-09-29T09:00:00Z",

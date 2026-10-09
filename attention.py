@@ -560,13 +560,17 @@ def items_from_review_search(rows):
 
 def _review_item(row):
     repo = row["repository"]["nameWithOwner"]
-    return _item(
+    jira, guess = _pr_jira(row.get("headRefName"), row.get("title"))
+    item = _item(
         "REVIEW", container=repo, ref=_ref(repo, row["number"]), title=row["title"], url=row["url"],
-        author=(row.get("author") or {}).get("login", ""), jira=jira_url(row.get("headRefName")),
+        author=(row.get("author") or {}).get("login", ""), jira=jira,
         links=_github_links(row.get("closingIssuesReferences")) + _issue_refs_in(row.get("title"), repo),
         labels=_labels(row.get("labels")), states=["review-requested"], detail="review requested",
         times={"updated": row.get("updatedAt"), "created": row.get("createdAt")},
         draft=bool(row.get("isDraft")))
+    if guess:
+        item["jira_guess"] = True
+    return item
 
 
 def items_from_own_prs(rows, views, checks, threads, me=""):
@@ -603,10 +607,11 @@ def pr_states(view, checks, threads, me=""):
 
 def _pr_item(view, states, checks, threads):
     repo = view["url"].split("/pull/")[0].split("github.com/")[-1]
-    return _item(
+    jira, guess = _pr_jira(view.get("headRefName"), view.get("title"), _text_of(view))
+    item = _item(
         "MY PR", container=repo, ref=_ref(repo, view["number"]), title=view["title"],
         url=view["url"], author=(view.get("author") or {}).get("login", ""),
-        jira=jira_url(view.get("headRefName")) or _jira_url_in(_text_of(view)),
+        jira=jira,
         links=list(dict.fromkeys(_github_links(view.get("closingIssuesReferences"))
                                  + _issue_refs_in(view.get("title"), repo)
                                  + _github_links_in(_text_of(view)))),
@@ -614,6 +619,9 @@ def _pr_item(view, states, checks, threads):
         detail=_pr_detail(view, states, checks, threads),
         times={"updated": view.get("updatedAt"), "created": view.get("createdAt")},
         draft=bool(view.get("isDraft")))
+    if guess:
+        item["jira_guess"] = True
+    return item
 
 
 def _pr_detail(view, states, checks, threads):
@@ -861,15 +869,22 @@ def items_from_mail(threads, groups=None):
 
 
 def _closed_pr_item(node, chip):
+    """The same link rule as the open read: a key in the branch, a browse URL in
+    the body, or — as a guess — a bare key in the title. A PR must not lose its
+    ticket the moment it merges."""
     repo = node["repository"]["nameWithOwner"]
-    return _item(
+    jira, guess = _pr_jira(node.get("headRefName"), node.get("title"), node.get("body"))
+    item = _item(
         chip, container=repo, ref=_ref(repo, node["number"]), title=node["title"], url=node["url"],
-        author=(node.get("author") or {}).get("login", ""), jira=jira_url(node.get("headRefName")),
+        author=(node.get("author") or {}).get("login", ""), jira=jira,
         links=_graphql_links((node.get("closingIssuesReferences") or {}).get("nodes"))
               + _issue_refs_in(node.get("title"), repo),
         labels=_labels((node.get("labels") or {}).get("nodes")),
         states=["merged" if node.get("state") == "MERGED" else "closed"],
         times={"updated": node.get("closedAt"), "created": node.get("createdAt")})
+    if guess:
+        item["jira_guess"] = True
+    return item
 
 
 def _closed_issue_item(node):
@@ -936,6 +951,24 @@ def _jira_url_in(text):
     URL-only on purpose: a bare KEY-123 token false-positives on UTF-8/SHA-256."""
     m = JIRA_REF.search(text or "")
     return JIRA_BASE + m.group(1) if m else ""
+
+
+def jira_key_in(title):
+    """The first bare KEY-123 token in a PR title. A guess, not a link: a title
+    can cite an older ticket ("revert RBT-336 hack"), so `_with_jira` unlinks a
+    guess Jira does not resolve instead of warning about it."""
+    keys = JIRA_KEY.findall(title or "")
+    return JIRA_BASE + keys[0] if keys else ""
+
+
+def _pr_jira(branch="", title="", body=""):
+    """A PR's Jira link, and whether it is a guess. Deliberate first — a key in
+    the branch, then a browse URL in the body — then a bare key in the title."""
+    deliberate = jira_url(branch) or _jira_url_in(body)
+    if deliberate:
+        return deliberate, False
+    guess = jira_key_in(title)
+    return guess, bool(guess)
 
 
 def _labels(objs):
@@ -1431,7 +1464,7 @@ def _collect_closed(cli, me, now, errors):
     closed, seen = [], set()
     for qualifier, chip in (("author", "MY PR"), ("reviewed-by", "REVIEWED")):
         query = ('{ search(type: ISSUE, first: 100, query: "is:pr is:closed %s:%s closed:>=%s") { nodes { '
-                 '... on PullRequest { number title url state closedAt headRefName createdAt updatedAt '
+                 '... on PullRequest { number title url state closedAt headRefName createdAt updatedAt body '
                  'author { login } labels(first:20) { nodes { name color } } repository { nameWithOwner } '
                  'closingIssuesReferences(first:10) { nodes { number repository { nameWithOwner } } } } } } }'
                  ) % (qualifier, who, since)
@@ -1471,7 +1504,8 @@ def _collect_closed(cli, me, now, errors):
 def _with_jira(items, errors, fetch):
     """Attach the Jira ticket behind each item's link; one twg call per key.
     A key that does not resolve is not a link: mail subjects and snippets carry
-    bare KEY-123 tokens, and UTF-8 / SHA-256 match that shape."""
+    bare KEY-123 tokens, and so do PR titles (UTF-8 / SHA-256 match that shape).
+    Both are guesses, and a guess that misses unlinks without a word."""
     cache, failures, reported = {}, {}, set()
     for item in items:
         url = item.get("jira")
@@ -1486,7 +1520,7 @@ def _with_jira(items, errors, fetch):
         if cache.get(key):
             item["jira_issue"] = cache[key]
         elif key in failures:
-            if item.get("source") == "mail":
+            if item.get("source") == "mail" or item.get("jira_guess"):
                 item["jira"] = ""
             elif key not in reported:
                 reported.add(key)
