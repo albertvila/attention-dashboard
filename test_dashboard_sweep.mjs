@@ -26,21 +26,36 @@ const snapshot = at => ({
 
 /* The page is a document, so every element it asks for is a stub that answers
    with another stub; the two things under test are the ones it is not. */
-function mount() {
-  const collected = [], stamped = [], elements = {};
+function mount(opts = {}) {
+  const collected = [], stamped = [], elements = {}, created = [];
   const stub = () => new Proxy(
     { classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, style: {}, dataset: {},
       appendChild: stub, addEventListener(){}, remove(){}, focus(){} },
     { get: (t, k) => (k in t ? t[k] : (t[k] = () => stub())), set: (t, k, v) => (t[k] = v, true) });
+  /* Every node the page makes goes through el(), which sets className and then
+     textContent on it — so a node that records those two writes is how a test
+     reads what the page wrote, without a DOM. */
+  const node = () => new Proxy(
+    { classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, style: {}, dataset: {},
+      appendChild: stub, addEventListener(){}, remove(){}, focus(){} },
+    { get: (t, k) => (k in t ? t[k] : (t[k] = () => stub())),
+      set: (t, k, v) => { t[k] = v; if (k === 'textContent') created.push({cls: t.className, text: v}); return true; } });
   let now = NOW, interval = null, state = 'visible';
   const ctx = {
     console, setTimeout, clearTimeout, Proxy,
-    document: { createElement: stub, createTextNode: stub, createDocumentFragment: stub,
+    document: { createElement: () => node(), createTextNode: stub, createDocumentFragment: stub,
                 querySelector: stub, querySelectorAll: () => [], getElementsByTagName: () => [],
                 getElementById: id => (elements[id] ||= stub()), addEventListener(){},
                 get visibilityState() { return state; } },
     // a look is a collection and a record: which one it moved is the whole test
-    fetch: async () => { collected.push(now); return { json: async () => snapshot(new Date(now).toISOString()) }; },
+    fetch: async url => {
+      collected.push(now);
+      // a rail that never answers is a rail that must not hold the board
+      if (opts.railsSilent && (String(url).startsWith('/specs') || String(url).startsWith('/sessions'))) {
+        return new Promise(() => {});
+      }
+      return { json: async () => snapshot(new Date(now).toISOString()) };
+    },
     localStorage: { getItem: () => stamped.at(-1) ?? null, setItem: (k, v) => stamped.push(v) },
     setInterval: (fn, ms) => { interval = { fn, ms }; },
     Date: class extends Date {
@@ -57,7 +72,9 @@ function mount() {
   vm.runInContext(readFileSync(join(here, 'attention-view.js'), 'utf8'), context);
   vm.runInContext(page, context);
   return {
-    collected, stamped, intervalMs: () => interval && interval.ms,
+    collected, stamped, created, intervalMs: () => interval && interval.ms,
+    element: id => elements[id],
+    textsOf: cls => created.filter(c => c.cls === cls).map(c => c.text),
     hide: () => { state = 'hidden'; },
     show: () => { state = 'visible'; },
     age: ms => { now += ms; },
@@ -97,6 +114,19 @@ assert.equal(p.stamped.length, stamps + 1, 'a fresh snapshot records the look');
 /* The rails: specs keeps a column of its own wherever three fit — specs left,
    board middle, live work right — and reads first in the stack, never after the
    board, where a short screen buries it. */
+/* The board is the queue, and the rails are read beside it: a first look paints
+   from the queue alone, and a rail with nothing to show says it is reading until
+   its own read lands. Here /specs and /sessions never answer at all. */
+const r = mount({ railsSilent: true });
+await tick();
+assert.match(r.element('stamp').textContent, /^snapshot/, 'the board paints with the rails still out');
+assert.ok(r.textsOf('railtip').some(t => /Reading the backlog/.test(t || '')),
+  'the specs rail says it is reading, not that there is nothing');
+assert.ok(r.textsOf('railtip').some(t => /Reading what is open right now/.test(t || '')),
+  'and so does the agent rail');
+assert.ok(!r.textsOf('railtip').some(t => /No open spec issues|No session open right now/.test(t || '')),
+  'neither rail claims to be empty before its read has landed');
+
 const queries = html.slice(html.indexOf('@media'), html.indexOf('#app{min-width:0}'));
 assert.ok(/@media \(max-width:1000px\)\{[\s\S]*?#specs\{order:-1/.test(queries),
   'the stacked layout reads specs first');

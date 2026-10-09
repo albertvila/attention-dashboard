@@ -237,6 +237,9 @@ try { seenAt = localStorage.getItem(SEEN_KEY); } catch(e) {}
 let snoozes = {}, acks = {}, status = null, view = null;
 let sessions = {}, specs = [], sessionErrors = [], specErrors = [];
 let snap = null, refreshing = false, looking = false;
+/* Whether this look's own read of each rail has landed: until it has, a rail
+   with nothing to show says it is reading rather than saying it is empty. */
+let specsRead = false, sessionsRead = false;
 
 /* The last look belongs to a reader who is actually looking: a hidden or
    restored tab records nothing, and coming back to a snapshot older than
@@ -261,37 +264,53 @@ async function load(isRefresh){
     const queueUrl = viewing
       ? '/queue?login=' + encodeURIComponent(viewing)
       : (isRefresh ? '/refresh' : '/api/queue');
-    /* Every read goes out in one wave. On a refresh the queue read is a live
-       collection, and the rails used to wait for it to be over before they had
-       even started. `/team` is the one that stays out of the gate: the roster
-       only fills the Team box, so the board is not held up for it. */
-    const teamRes = fetch('/team', {cache:'no-store'});
-    const [res, snaps, acksRes, statusRes, sessionRes, specRes] = await Promise.all([
+    /* Every read goes out in one wave, and the board waits only for what the
+       board is made of: the queue, parking, and the stamp it sits under. The
+       three rails are read per request and paint themselves when their own read
+       lands — a gh search on the specs rail is a second of network for a rail
+       that is not the queue, so it must not hold up the queue. On a refresh the
+       queue read is a live collection, which is why nothing waits behind it. */
+    const reads = {
+      sessions: viewing ? Promise.resolve({}) : fetch('/sessions', {cache:'no-store'}).then(r => r.json()).catch(() => ({})),
+      specs: viewing ? Promise.resolve({}) : fetch('/specs', {cache:'no-store'}).then(r => r.json()).catch(() => ({})),
+      team: fetch('/team', {cache:'no-store'}).then(r => r.json()).catch(() => []),
+    };
+    const [res, snaps, acksRes, statusRes] = await Promise.all([
       fetch(queueUrl, {cache:'no-store'}),
-      fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}), fetch('/status', {cache:'no-store'}),
-      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/sessions', {cache:'no-store'}),
-      viewing ? Promise.resolve({json: async () => ({})}) : fetch('/specs', {cache:'no-store'})]);
+      fetch('/snoozes', {cache:'no-store'}), fetch('/acks', {cache:'no-store'}),
+      fetch('/status', {cache:'no-store'})]);
     const data = await res.json();
     snoozes = await snaps.json().catch(() => ({}));
     acks = await acksRes.json().catch(() => ({}));
     status = await statusRes.json().catch(() => null);
-    /* Sessions and specs are live machine and backlog state, read per request
-       like parking — never part of the snapshot, which is written on the hour. */
-    const live = await sessionRes.json().catch(() => ({}));
-    sessions = live.repos || {}; sessionErrors = live.errors || [];
-    const backlog = await specRes.json().catch(() => ({}));
-    specs = backlog.issues || []; specErrors = backlog.errors || [];
+    snap = data;
+    /* The rails' previous read, not this one: a rail that already has rows keeps
+       them until the new ones land, and only a first look says it is reading. */
+    view = AttentionView.overlay(data, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
+    render(data);
+
+    /* Each rail lands on its own, and the specs are the rules' own list: they
+       are what says a rail row is already on the board, so the view is rebuilt
+       with them rather than the rail guessing. */
+    reads.specs.then(backlog => {
+      specsRead = true;
+      specs = backlog.issues || []; specErrors = backlog.errors || [];
+      view = AttentionView.overlay(snap, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
+      paintSpecs();
+    });
+    reads.sessions.then(live => {
+      sessionsRead = true;
+      sessions = live.repos || {}; sessionErrors = live.errors || [];
+      paintSessions();
+    });
     /* Who is on the teams you listed, and whether the switch is even on: read
        with the rest of the live state, so flipping it in config.json lands on
        the next look rather than the next page load. It only paints the Team
        box, so it lands when it lands. */
-    teamRes.then(r => r.json()).catch(() => []).then(roster => {
+    reads.team.then(roster => {
       team = Array.isArray(roster) ? roster : [];
       paintTeam();
     });
-    snap = data;
-    view = AttentionView.overlay(data, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
-    render(data);
     /* The Briefing opens with the sentence; the snapshot's own stamp stays
        underneath it. */
     day.textContent = new Date(data.generatedAt).toLocaleDateString([], {weekday:'long', day:'numeric', month:'long'});
@@ -502,7 +521,8 @@ function paintSessions(){
     + repos.reduce((n, [, live]) => n + live.length, 0)));
   sessionsRail.appendChild(el('p','railtip','Agent sessions open right now, one box per repository: green while an agent works, amber blocked, grey merely open. A card whose repository is here is being worked on.'));
   for(const e of sessionErrors) sessionsRail.appendChild(el('p','railtip','\u26a0 ' + e.where + ' failed'));
-  if(!viewing && !repos.length && !sessionErrors.length) sessionsRail.appendChild(el('p','railtip','No session open right now.'));
+  if(!viewing && !repos.length && !sessionErrors.length) sessionsRail.appendChild(el('p','railtip',
+    sessionsRead ? 'No session open right now.' : 'Reading what is open right now\u2026'));
   if(!viewing) for(const [repo, live] of repos) sessionsRail.appendChild(sessionBox(repo, live));
   paintTeam();
 }
@@ -570,7 +590,8 @@ function paintSpecs(){
   for(const err of specErrors) specsRail.appendChild(el('p','railtip', err.missing
     ? '\u26a0 ' + err.where + ' is off: ' + err.missing + ' is not installed'
     : '\u26a0 ' + err.where + ' failed'));
-  if(!list.length && !specErrors.length) specsRail.appendChild(el('p','railtip','No open spec issues.'));
+  if(!list.length && !specErrors.length) specsRail.appendChild(el('p','railtip',
+    specsRead ? 'No open spec issues.' : 'Reading the backlog\u2026'));
   /* One list only when there is nothing to tell apart. */
   if(!mine.length || !watched.length){
     list.forEach(s => specsRail.appendChild(specRow(s)));

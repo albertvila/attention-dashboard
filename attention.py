@@ -1834,6 +1834,12 @@ class Server(ThreadingHTTPServer):
     aborted during a refresh — is a dropped connection, not a stack trace on
     the console. Everything else still reports as usual."""
 
+    # One look opens six connections at once (the queue, parking, the stamp and
+    # the three rails) and the listen backlog is five, so the rest were dropped:
+    # a reset rail read fell back to an empty rail, and a reset queue read left
+    # the page on its error box. Measured: 10 at once lost 2-3.
+    request_queue_size = 32
+
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
             super().handle_error(request, client_address)
