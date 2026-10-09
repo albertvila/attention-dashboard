@@ -12,13 +12,10 @@
   state. The queue's rules do not reach it and it is not queue data — it is a
   hand-maintained page, edited here. Nothing is persisted.
 
-  Provenance, all in the dotfiles repo under docs/:
-    dev-workflow.excalidraw, diagram.excalidraw, matt-pocock-flow.excalidraw
-      the six-step loop, the two run shapes, the single-thread flow
-    skills-cheatsheet.html
-      the skills table, lifted verbatim
-  That repo also keeps the prototype this layout was chosen from, in
-  .scratch/prototype-diagrams/.
+  Provenance: dev-workflow.excalidraw and diagram.excalidraw beside this file
+  hold the loop and the run shapes it was written from (untracked scratch, not
+  served). The skills table is hand-maintained here, one entry per skill that is
+  installed or one click from being.
 -->
 <style>
   :root {
@@ -87,6 +84,7 @@
   .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
 
   #skills{scroll-margin-top:132px}
+  .inst{text-transform:none;letter-spacing:0;font-weight:400}
 
   footer{max-width:1180px;margin:30px auto 0;color:var(--dim);font-size:12.5px;border-top:1px solid var(--border);padding-top:14px}
 </style>
@@ -104,20 +102,18 @@
 
 <script>
 /* ================================================================= DATA == */
-/* Skills data is lifted verbatim from docs/skills-cheatsheet.html so the two
-   stay comparable while the layout question is open. */
+/* Each source carries where its skills come from: a filter the reader clicks
+   has to land somewhere that says how to get them, not only what they are. */
 const SOURCES = {
-  mp:          { label: 'Matt Pocock',              color: '#6cb6ff' },
-  bb:          { label: 'bb-orchestration-skills',  color: '#ff9e64' },
-  bbtool:      { label: 'BB builtin',               color: '#4fd6be' },
-  lmai:        { label: 'LM-AI repo',               color: '#d16d9e' },
-  custom:      { label: 'Custom / yours',           color: '#9ece6a' },
-  ponytail:    { label: 'npm: ponytail',            color: '#e0af68' },
-  plannotator: { label: 'npm: plannotator',         color: '#bb9af7' },
-  mcp:         { label: 'npm: pi-mcp-adapter',      color: '#f7768e' },
-  skillssh:    { label: 'skills.sh',                color: '#7dcfff' },
-  orch:        { label: 'orchestration (Alas/BB/Herdr/Orca)', color: '#a4b1ff' },
-  twg:         { label: 'TWG (Atlassian)',          color: '#ff7eb6' },
+  mp:          { label: 'Matt Pocock',      color: '#6cb6ff', from: { text: 'github.com/mattpocock/skills', href: 'https://github.com/mattpocock/skills' } },
+  lmai:        { label: 'LM-AI repo',       color: '#d16d9e', from: { text: 'github.com/Launchmetrics/LM-AI (internal)', href: 'https://github.com/Launchmetrics/LM-AI' } },
+  bbtool:      { label: 'BB builtin',       color: '#4fd6be', from: { text: 'ships with BB' } },
+  ponytail:    { label: 'npm: ponytail',    color: '#e0af68', from: { text: 'github.com/DietrichGebert/ponytail', href: 'https://github.com/DietrichGebert/ponytail' } },
+  plannotator: { label: 'npm: plannotator', color: '#bb9af7', from: { text: 'github.com/backnotprop/plannotator', href: 'https://github.com/backnotprop/plannotator' } },
+  skillssh:    { label: 'skills.sh',        color: '#7dcfff', from: { text: 'github.com/vercel-labs/skills', href: 'https://github.com/vercel-labs/skills' } },
+  orch:        { label: 'orchestration',    color: '#a4b1ff', from: { text: 'github.com/albertvila/dotfiles', href: 'https://github.com/albertvila/dotfiles/tree/main/home/.agents/skills' } },
+  herdr:       { label: 'Herdr',            color: '#9d7cd8', from: { text: 'github.com/herdrdev/herdr', href: 'https://github.com/herdrdev/herdr' } },
+  twg:         { label: 'TWG (Atlassian)',  color: '#ff7eb6', from: { text: 'twg skills install' } },
 };
 
 const SECTIONS = [
@@ -132,13 +128,12 @@ const SECTIONS = [
 ]],
 ["Review & merge", [
   ["code-review", "Review changes since a commit/branch/merge-base against Standards + Spec, in parallel. \"review since X\".", "mp"],
+  ["pr", "Write the PR body from the repo's template.", "mp", "automatic when a PR body is written"],
 ]],
 ["Debug & incidents", [
   ["diagnosing-bugs", "Diagnosis loop for hard bugs and perf regressions. \"diagnose this\", \"it's broken/slow\".", "mp"],
   ["lm-debug", "/lm-debug — hypothesis-driven debugging with log injection (Cursor debug-mode style).", "lmai"],
   ["lm-fireline", "Investigate a prod incident from a FIRE ticket / Slack alert / Databricks run URL; post root cause to Jira.", "lmai"],
-  ["den-triage", "Triage failed DEN Databricks prod jobs end to end: discover, investigate, report into bb tasks.", "custom"],
-  ["lm-doc-trace", "Why is this post/article missing or wrong (brand, reach, MIV…)? Plain-language trace through the LM data pipeline.", "custom"],
 ]],
 ["Think & decide", [
   ["grilling", "Grill me relentlessly about a plan, decision, or idea. Any \"grill\" trigger phrase.", "mp"],
@@ -165,7 +160,6 @@ const SECTIONS = [
 ["Codebase & architecture", [
   ["codebase-design", "Deep-module vocabulary: interfaces, seams, testability, AI-navigability.", "mp"],
   ["improve-codebase-architecture", "Scan for deepening opportunities → visual HTML report → grill through your pick.", "mp"],
-  ["improve-architecture-auto", "Fully automatic architecture improvement, hot-spot scan to scored tickets, zero questions.", "custom"],
   ["tdd", "Test-first features and bug fixes; red-green-refactor, integration tests.", "mp"],
   ["migrate-to-shoehorn", "Replace `as` type assertions in tests with @total-typescript/shoehorn.", "mp"],
   ["resolving-merge-conflicts", "Resolve an in-progress git merge/rebase conflict.", "mp"],
@@ -185,10 +179,6 @@ const SECTIONS = [
   ["lm-pyconv", "LM Python conventions package: Black, isort, Flake8 + plugins, CLI, IDE integration.", "lmai"],
   ["lm-summarize-jira-ticket", "/lm-summarize-jira-ticket — dev-focused TL;DR of a Jira ticket: what to build, why, ACs, open questions.", "lmai"],
 ]],
-["Personal", [
-  ["unani-metricas", "\"procesa las métricas\" — calcula macros de los días (parcial) del registro Unani y añade las tablas al markdown.", "custom"],
-  ["reading-digest", "\"run the reading digest\" — triage the links saved in Things: worth-your-time verdicts, repo health, and a UUID delete queue for the graveyard.", "custom"],
-]],
 ["Ponytail (minimal-code mode)", [
   ["ponytail", "Laziest solution that works: stdlib first, shortest diff. \"ponytail\", \"be lazy\", \"yagni\".", "ponytail"],
   ["ponytail-review", "/ponytail-review — review a diff exclusively for over-engineering; what to delete.", "ponytail"],
@@ -199,7 +189,6 @@ const SECTIONS = [
 ]],
 ["Internals & meta", [
   ["bb-cli", "Inspect or manage BB state with the bb CLI.", "bbtool"],
-  ["mcp-scripting", "Write mcpScript JavaScript for discovering, inspecting, and calling MCP tools.", "mcp"],
   ["plannotator", "Plannotator CLI: annotate plans, code, files, URLs; browse decisions; share Guided Reviews.", "plannotator"],
 ]],
 ["Only visible in BB (not installed as pi skills)", [
@@ -224,9 +213,9 @@ const SECTIONS = [
   ["orchestrate-herdr-plan", "Plan a Herdr run and run it as coordinator of this pane.", "orch", "`/orchestrate-herdr-plan @.scratch/<feature>/` or `#42`"],
   ["orchestrate-herdr-threads", "Execute a Herdr plan: one pi agent per tab, ledger, reviews, land.", "orch", "`/orchestrate-herdr-threads` (this pane carries a manifest)"],
   ["orchestrate-herdr-retro", "Retro a finished Herdr run: per-phase time, tokens, what to fix.", "orch", "“retro the run” / `/orchestrate-herdr-retro`"],
-  // --- terminals, handoff, PRs ---
-  ["herdr", "Drive the Herdr multiplexer: workspaces, tabs, panes, commands, other agents' terminals.", "orch", "mention Herdr while `HERDR_ENV=1` — “new tab running the tests”"],
-  ["pr", "Write the PR body from the repo's template.", "orch", "automatic when a PR body is written"],
+  // --- terminals ---
+  ["herdr", "Drive the Herdr multiplexer: workspaces, tabs, panes, commands, other agents' terminals.", "herdr", "mention Herdr while `HERDR_ENV=1` — “new tab running the tests”"],
+  ["herdr-gpui-browser", "Open a browser tab in Herdr GPUI beside your terminals, and read back the notes pinned on it.", "herdr", "“open a browser tab” / “show me this page” while inside Herdr"],
   // --- TWG: Atlassian / company context ---
   ["twg", "Root router for company context: Jira, Confluence, PRs, owners, rollups, incidents, deep research.", "twg", "ask any Atlassian/company question — it picks the twg-* sub-skill"],
   ["twg-jira", "Jira workitems, duplicate detection, projects, boards, sprints, fields, transitions, links.", "twg", "“find duplicate tickets for FIRE-123”, “move ABC-7 to Done”"],
@@ -241,7 +230,6 @@ const SECTIONS = [
   ["twg-space-creation", "Create, design, bootstrap or clone a whole Confluence space from a brief or existing space.", "twg", "“create a Confluence space for <domain>”"],
   ["twg-agentic-search", "Iterative Rovo search across Confluence, Jira, Drive, Slack, Bitbucket, GitHub.", "twg", "with `twg` for “deep research on X across our docs”"],
   ["twg-artifacts", "Publish a local or generated file as an Atlassian Artifact.", "twg", "“share this report as an artifact”"],
-  ["twg-bench-lite", "A/B a single prompt: free Atlassian/local MCP context vs TWG graph context.", "twg", "“bench TWG vs plain MCP”"],
 ]],
 ];
 
@@ -258,17 +246,17 @@ const WORKFLOW = [
   { n:3, id:'tickets', title:'Spec → tickets', cmd:'/to-tickets', sub:'tracer bullets + blockedBy edges',
     body:'Tracer-bullet tickets, one vertical slice each: local issue files, or GitHub sub-issues with blockedBy edges. That graph is the order.',
     skills:['to-tickets','wayfinder'], out:'the ticket graph' },
-  { n:4, id:'plan', title:'Plan', cmd:'/orchestrate-bb-plan', sub:'plan thread · one approval',
+  { n:4, id:'plan', title:'Plan', cmd:'/orchestrate-plan', sub:'plan thread · one approval',
     body:'Reads the spec + tickets, reduces tickets → items (fewer is the default), gives each item a file scope and a wave, renders the plan for one approval. On your yes it records the plan and spawns the manager.',
-    skills:['orchestrate-bb-plan'], out:'an approved plan, and the manager',
+    skills:['orchestrate-plan'], out:'an approved plan, and the manager',
     facts:['the manifest is the approved plan — never re-asked','one approval, then it spawns the manager','a plan without a valid manifest never dispatches'] },
-  { n:5, id:'run', title:'Run', cmd:'/orchestrate-bb-threads', sub:'the orchestrator + its workers',
+  { n:5, id:'run', title:'Run', cmd:'/orchestrate-threads', sub:'the orchestrator + its workers',
     body:'One worker thread per item: waves run in parallel, overlapping file scopes serialize. Every DONE gets a fresh-eyes code review — findings loop back to the same worker, cap 3. Run done → ponytail over all changes → open PR.',
-    skills:['orchestrate-bb-threads','implement','tdd','code-review','ponytail-review'], out:'one shared PR, or one PR per item',
+    skills:['orchestrate-threads','implement','tdd','code-review','ponytail-review'], out:'one shared PR, or one PR per item',
     facts:['parallel only on disjoint file scopes','review is independent of the worker that wrote it','DONE is a claim until a reviewer passes it'] },
-  { n:6, id:'retro', title:'Retro', cmd:'/orchestrate-bb-retro', sub:'the manager\u2019s sibling thread',
+  { n:6, id:'retro', title:'Retro', cmd:'/orchestrate-retro', sub:'the manager\u2019s sibling thread',
     body:'Reads the run\u2019s metrics and event log: time per phase, tokens and cost per model, what went wrong. Proposes concrete edits to the orchestration skills.',
-    skills:['orchestrate-bb-retro'], out:'skill edits, one commit',
+    skills:['orchestrate-retro'], out:'skill edits, one commit',
     facts:['a number with no explanation is a finding','the record is archived to the corpus','the edits are the point: the next run starts sharper'] },
 ];
 const LOOPBACK = { from:'6 · Retro', to:'4 · Plan',
@@ -290,32 +278,16 @@ const SUPPORTING = [
 const FLOWS = [
   { key:'A', title:'Flow A — single shared PR', tag:'DEFAULT',
     note:'Workers share the manager\u2019s worktree. Parallel ONLY when items touch disjoint files; overlapping files serialize. Workers never talk to each other.',
-    run:'/orchestrate-bb-threads @.scratch/dead-code-cleanup/issues/',
+    run:'/orchestrate-threads @.scratch/dead-code-cleanup/issues/',
     runNote:'Flow A is the default — nothing to state',
     lane:[['manager','ledger: orchestration.json'],['worker 01','/implement — drives /tdd + its own review · Flash'],['review 01','/code-review — fresh eyes · Sonnet 5','rev'],['ponytail','/ponytail-review — one pass over the combined diff · Flash','pony'],['1 commit → PR','you review on GitHub; manager proposes the message first']],
     tails:['findings → same worker, cap 3','ponytail findings → a worker that implements only those; re-check, cap 3 (skips code-review)','after you merge: pull main, retire worktree + branch, final report'] },
   { key:'B', title:'Flow B — PR per item', tag:'state it',
     note:'Each worker gets its own worktree + branch. All lanes run fully parallel; isolation means no clobbering.',
-    run:'/orchestrate-bb-threads @.scratch/repo-cleanup/issues/ — PR per item',
+    run:'/orchestrate-threads @.scratch/repo-cleanup/issues/ — PR per item',
     runNote:'say it, or you get Flow A',
     lane:[['manager','ledger: orchestration.json'],['worker 0n','/implement — own worktree + branch · Flash'],['review 0n','/code-review — fresh eyes · Sonnet 5','rev'],['ponytail 0n','/ponytail-review · Flash','pony'],['open PR 0n','you review on GitHub']],
     tails:['findings → same worker, cap 3','findings → same or new worker, NO re-review, cap 3','ponytail fix path: worker implements findings → straight back to ponytail','after your reviews: manager merges PRs in dependency order (or you do), resolving cross-PR conflicts, then retires the worktrees'] },
-];
-
-/* ---- the single-thread flow, for work that does not need a run ---- */
-const REFERENCE = {
-  title:'The Matt Pocock flow — idea → open PR',
-  sub:'Seven small composable skills in a line, not one owned process. Align before code, review before the PR. This is the single-thread flow — the same six steps without the orchestration.',
-  href:'https://github.com/mattpocock/skills',
-  setup:'One-time setup per repo: /setup-matt-pocock-skills installs the rest',
-  steps:[['1 · Align','/grill-with-docs — interview only, no code'],['2 · Spec','/to-spec — one spec, one file'],['3 · Tickets','/to-tickets — tracer bullets + blockedBy'],['4 · Build','/implement — one vertical slice, TDD'],['5 · Fresh eyes','/code-review — standards + spec'],['6 · Ship','open PR — you review on GitHub']],
-};
-
-/* ---- automations and standing rules ---- */
-const AUTOMATIONS = [
-  { name:'scratch-sweep', when:'weekly · Mon 09:00 · auto_9zgd3nv-z3i',
-    body:'Scans .scratch/ across every project for pending specs, classifies each as spec-only or tickets-ready, and files one BB task per spec behind a human gate. Deduped by path.',
-    skills:['bb-cli'] },
 ];
 
 /* =============================================================== RENDER == */
@@ -329,9 +301,9 @@ const state = { q:'', src:null, sel:null };
 
 function skillCard(name) {
   const s = SKILL_INDEX[name];
-  if (!s) return `<div class="card" data-name="${esc(name)}" data-src="custom"><div class="top"><div class="name">/${esc(name)}</div><span class="badge" style="color:#8b93a1;border-color:#8b93a155">not in cheatsheet</span></div></div>`;
+  if (!s) return `<div class="card" data-name="${esc(name)}"><div class="top"><div class="name">/${esc(name)}</div><span class="badge" style="color:#8b93a1;border-color:#8b93a155">not in this table</span></div></div>`;
   const c = SOURCES[s.src] || { label:s.src, color:'#8b93a1' };
-  return `<div class="card" data-name="${esc(name)}" data-src="${s.src}" data-s="${(name+' '+s.desc+' '+c.label+' '+(s.usage||'')).toLowerCase()}">
+  return `<div class="card" data-name="${esc(name)}" data-src="${s.src}">
     <div class="top"><div class="name">/${esc(name)}</div>
     <span class="badge" style="color:${c.color};border-color:${c.color}55;background:${c.color}14">${c.label}</span></div>
     <div class="desc">${esc(s.desc)}</div>${s.usage ? `<div class="usage"><b>Use:</b> ${esc(s.usage)}</div>` : ''}</div>`;
@@ -343,25 +315,48 @@ function skillCard(name) {
 function skillPill(name) {
   return `<button type="button" class="pill mono" data-jump="${esc(name)}">/${esc(name)}</button>`;
 }
+/* The loop names the shape, not the harness: /orchestrate-plan is two skills
+   today, one per harness, and the filter has to reach both. */
+const SKILL_ALIASES = {
+  'orchestrate-plan':    ['orchestrate-bb-plan', 'orchestrate-herdr-plan'],
+  'orchestrate-threads': ['orchestrate-bb-threads', 'orchestrate-herdr-threads'],
+  'orchestrate-retro':   ['orchestrate-bb-retro', 'orchestrate-herdr-retro'],
+};
+
 // the one predicate every variant and the state readout agree on
 function matches(name) {
   const s = SKILL_INDEX[name];
   if (state.src && (!s || s.src !== state.src)) return false;
   if (!state.q) return true;
+  const alias = SKILL_ALIASES[state.q];
+  if (alias) return alias.includes(name);
   const hay = s ? (name + ' ' + s.desc + ' ' + (s.usage || '')).toLowerCase() : name.toLowerCase();
   return hay.includes(state.q);
 }
-const hits = names => names.filter(matches).length;
+// A step may name a shape where the table lists skills: expand it before
+// filtering, so the card dims on what the shape really reaches.
+const hits = names => names.flatMap(n => SKILL_ALIASES[n] || [n]).filter(matches).length;
 
 function renderSkills() {
+  const shown = [];
   const html = SECTIONS.map(([title, skills]) => {
-    const cards = skills.filter(([n]) => matches(n)).map(([n]) => skillCard(n)).join('');
+    const cards = skills.filter(([n]) => matches(n)).map(([n]) => (shown.push(n), skillCard(n))).join('');
     return cards ? `<section data-sect="${esc(title)}"><h2>${esc(title)}</h2><div class="grid">${cards}</div></section>` : '';
   }).join('');
-  return { html, shown: matchedCount() };
+  return { html, names: shown };
 }
-const ALL_SKILLS = SECTIONS.flatMap(([, s]) => s.map(([n]) => n));
-const matchedCount = () => ALL_SKILLS.filter(matches).length;
+
+// Where the skills under the filter come from — the line beside the count, so a
+// click on a chip or a pill lands somewhere that says how to get them, not only
+// what they are.
+function installLine(names) {
+  if (!state.q && !state.src) return '';
+  const froms = [...new Set(names.map(n => (SKILL_INDEX[n] || {}).src))]
+    .map(s => SOURCES[s] && SOURCES[s].from).filter(Boolean);
+  if (!froms.length) return '';
+  return `<span class="inst"> · install — ${froms.map(f => f.href
+    ? `<a href="${f.href}">${esc(f.text)}</a>` : `<code>${esc(f.text)}</code>`).join(' · ')}</span>`;
+}
 
 // one flow box for the two run shapes, so they cannot drift apart
 function flowBox(f) {
@@ -391,13 +386,13 @@ function board() {
         <div class="desc2">${esc(s.body)}<br><span class="muted">produces:</span> ${esc(s.out)}</div></div>`;
     }).join('')}</div>
     <div class="loopback">↩ ${esc(LOOPBACK.from)} → ${esc(LOOPBACK.to)} · ${esc(LOOPBACK.text)}</div>
+    <div class="loopback">Steps 4–6 are the orchestrated run. Today it ships for <b>BB</b> and <b>Herdr</b>: each shape is one skill pair, so <code>/orchestrate-plan</code> is <code>orchestrate-bb-plan</code> or <code>orchestrate-herdr-plan</code>.</div>
     <div class="loopback">Your gates: ${GATES.map(esc).join(' · ')}</div>
     <h2>Pulled in when the work needs them</h2>
     ${supportingBlock()}
     <h2>Step 5 — pick a shape per run</h2>
     <div class="grid">${FLOWS.map(flowBox).join('')}</div>
-    <h2>Automations</h2><div class="rules">${AUTOMATIONS.map(a => `<div class="card"><div class="top"><div class="name">${esc(a.name)}</div><span class="usage">${esc(a.when)}</span></div><div class="desc">${esc(a.body)}</div></div>`).join('')}
-      <div class="card"><div class="name" style="color:var(--accent);font-size:13px">${esc(REFERENCE.title)}</div><div class="desc">${esc(REFERENCE.sub)}</div><div class="usage"><a href="${REFERENCE.href}">${REFERENCE.href}</a></div></div></div>    <h2 id="skills">Skills — ${ref.shown} shown</h2>${ref.html}`;
+    <h2 id="skills">Skills — ${ref.names.length} shown${installLine(ref.names)}</h2>${ref.html}`;
 }
 
 /* ---- shell ---- */
@@ -408,12 +403,8 @@ function render() {
   applySkillFilter();
 }
 function applySkillFilter() {
-  for (const card of document.querySelectorAll('main .card[data-name]')) {
-    const name = card.dataset.name, s = SKILL_INDEX[name];
-    const hay = card.dataset.s || name.toLowerCase();
-    const ok = (!state.q || hay.includes(state.q)) && (!state.src || card.dataset.src === state.src);
-    card.classList.toggle('hidden', !ok);
-  }
+  for (const card of document.querySelectorAll('main .card[data-name]'))
+    card.classList.toggle('hidden', !matches(card.dataset.name));
   for (const sec of document.querySelectorAll('main section[data-sect]'))
     sec.classList.toggle('hidden', !sec.querySelector('.card[data-name]:not(.hidden)'));
 }
@@ -452,10 +443,9 @@ document.getElementById('legend').addEventListener('click', e => {
   document.getElementById('legend').innerHTML = Object.entries(SOURCES)
     .filter(([k]) => counts[k])
     .map(([k, s]) => `<span class="chip" data-src="${k}" style="color:${s.color}"><span class="dot" style="background:${s.color}"></span>${s.label} <b>${counts[k]}</b></span>`).join('');
-  document.getElementById('foot').innerHTML = `One hand-maintained page: the loop, the two run shapes, the standing rules and the skills table.
-    The loop and the run shapes are read from the <b>live</b> elements of <code>dev-workflow.excalidraw</code> and <code>diagram.excalidraw</code>,
-    and the skills table is lifted from <code>skills-cheatsheet.html</code> — all three in the dotfiles repo, <code>docs/</code>.
-    Clicking a skill pill filters to it; clicking a loop card opens what it produces.`;
+  document.getElementById('foot').innerHTML = `One hand-maintained page: the loop, the two run shapes and the skills table.
+    Clicking a source chip or a skill pill filters to it and names where those skills install from;
+    clicking a loop card opens what it produces.`;
   render();
 })();
 </script>
