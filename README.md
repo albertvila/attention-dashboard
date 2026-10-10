@@ -302,7 +302,7 @@ reader's terminal.
 
 ## Parking a card
 
-Every card carries a quiet `⏰ snooze / ack` picker, always visible and only
+Every card carries a quiet `⏰ snooze` picker, always visible and only
 styling up on hover:
 
 - **4 hours / 09:00 tomorrow / 09:00 next Monday** — snoozed: parked until that
