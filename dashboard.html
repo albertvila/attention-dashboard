@@ -170,6 +170,7 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .child .gh-label{font-size:9px;padding:0 6px}
 .child .fact{font-size:9px;padding:0 6px}
 .child-detail{color:#8b949e;font-size:11px}
+.child-title{color:#8b949e;font-size:11.5px;overflow-wrap:anywhere}
 .child-age{margin-left:auto;color:#6e7681;font-size:11px}
 /* Always visible (a hover-only control is undiscoverable), but quiet until the
    row is hovered. */
@@ -752,7 +753,7 @@ function card(it, kind){
   }else if(it.ref){
     m.appendChild(document.createTextNode(it.ref));
   }
-  if(!gone) for(const f of (it.facts || [])) m.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
+  if(!gone) for(const f of view.factsOf(it)) m.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
   if(it.detail) m.appendChild(document.createTextNode(' · ' + it.detail));
   b.appendChild(m);
   if(!gone){
@@ -798,7 +799,7 @@ function card(it, kind){
 /* Linked items behind a count at the row's right, beside age and parking,
    expanding in place. Never a left-edge twisty. */
 function kidPill(it){
-  const kids = it.children || [];
+  const kids = view.kidsOf(it);
   if(!kids.length) return null;
   const b = el('button','kidpill');
   const paint = open => {
@@ -831,6 +832,8 @@ function child(c){
   a.textContent = c.ref || c.title || '';
   a.title = c.title || c.ref || '';
   k.appendChild(a);
+  /* A linked item nobody has finished is worth reading without opening it. */
+  if(!view.closed(c) && c.title) k.appendChild(el('span','child-title', c.title));
   for(const st of c.states || []) k.appendChild(el('span','badge '+st.tier, st.label));
   const cchg = view.flag(c);
   if(cchg) k.appendChild(el('span','chg ' + view.changeTone(cchg), view.changeLabel(cchg)));

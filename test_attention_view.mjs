@@ -457,6 +457,30 @@ assert.equal(overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { k
 assert.match(overlay({ ...silData, changes: {} }, { now: NOW }).summaryText(),
   /^first look \u00b7 nothing to compare \u00b7 1 say nothing$/);
 
+// --- one fact once, one linked item once ------------------------------------
+// A Jira card carries its status twice — the state badge (`to deploy`) and the
+// raw status name as a fact (`TO_DEPLOY`), both off the same field — and lists a
+// linked item twice when one read saw it live and another saw it finished. What
+// a reader is shown of each is one.
+const shaped = overlay(data(), { now: NOW });
+assert.deepEqual(shaped.factsOf(row({ key: 'D1',
+  states: [{ key: 'to-deploy', label: 'to deploy', tier: 'ready', tone: 'info' }],
+  facts: [{ label: 'TO_DEPLOY', tone: 'warn' }] })), [],
+  'a fact that only restates the state is the same word twice');
+assert.deepEqual(shaped.factsOf(row({ facts: [{ label: 'Ready to Test', tone: 'warn' }] }))
+  .map(f => f.label), ['Ready to Test'], 'a status the state does not say is kept');
+assert.deepEqual(shaped.factsOf(row({ states: [], facts: [{ label: 'checks green', tone: 'ok' }] }))
+  .map(f => f.label), ['checks green'], 'no state, nothing to restate');
+
+assert.deepEqual(shaped.kidsOf(row({ key: 'K1',
+  children: [kid({ key: 'a' }), kid({ key: 'a' }), kid({ key: 'b' })] })).map(k => k.key), ['a', 'b'],
+  'a linked item that arrived twice is drawn once, in the order it arrived');
+assert.deepEqual(shaped.kidsOf(row({ key: 'a', children: [kid({ key: 'a' }), kid({ key: 'b' })] })).map(k => k.key),
+  ['b'], 'a card never lists itself');
+assert.equal(shaped.kidsOf(row({ children: [kid({ key: '' })] })).length, 1,
+  'a child with no key has nothing to tell apart');
+assert.deepEqual(shaped.kidsOf(row({})), [], 'a card with no links draws none');
+
 // --- stale-code witness -----------------------------------------------------
 assert.deepEqual(globalThis.AttentionView.stale({ producer: { code: 'aaa' } }, { producer: { code: 'aaa' } }),
   { stale: false, running: 'aaa', snapshot: 'aaa' });

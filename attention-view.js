@@ -54,6 +54,33 @@
   }
 
   /* ------------------------------------------------------------------------
+     What a card is drawn with: the source's own words once, and its linked
+     items once. Both rules live here rather than in a surface, so the page and
+     any other reader cannot disagree about what one card says. */
+
+  /** Two labels are the same word when only case and punctuation differ:
+      `to deploy` and `TO_DEPLOY` are one fact, and a Jira card carries both —
+      the state we normalised it to, and the status name it came from. */
+  const bare = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  /** The facts a reader is shown: a fact that only restates the card's own
+      state is the same word twice, and the state badge is the one that keeps
+      the tier. Everything the source says beyond that stays. */
+  function factsOf(row) {
+    const said = (row.states || []).map(s => bare(s.label));
+    return (row.facts || []).filter(f => said.indexOf(bare(f.label)) === -1);
+  }
+
+  /** The linked items a card is drawn with, once each: the same item arrives
+      twice when one read saw it live and another saw it finished, and a card
+      never lists itself. A child with no key has nothing to tell apart. */
+  function kidsOf(row) {
+    const seen = new Set();
+    return (row.children || []).filter(k => !k.key
+      || (k.key !== row.key && !seen.has(k.key) && seen.add(k.key)));
+  }
+
+  /* ------------------------------------------------------------------------
      The next line: what this card is asking for, and the evidence it stands on.
 
      Everything a line can stand on is a *kind* of evidence. The free kinds come
@@ -379,6 +406,7 @@
       nextOf: row => nextOf(row, readsFor(row), { lastLook: seenAt }),
       flag: row => flagOf(row, since),
       closed: isClosed,
+      factsOf, kidsOf,
       tiers, folds, notes, nextCard, counts, summaryText, silentCount, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
