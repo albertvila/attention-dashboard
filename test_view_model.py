@@ -1436,6 +1436,49 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(after["changes"]["items"]["o/r#1"]["to_state"], "merged")
         self.assertEqual(after["changes"]["summary"], {"new": 0, "moved": 1, "gone": 0})
 
+    def test_a_jira_reply_moves_the_card_and_wakes_an_ack(self):
+        """Jira's status never shows a comment, so a ticket's comment count is the
+        only witness that somebody wrote to you: a reply moves the row, labels the
+        move and restamps `lastChangedAt` — the stamp an ack compares itself to,
+        which is how a reply wakes one. The first generation that carries a count
+        sets the baseline instead of calling every commented ticket moved."""
+        def ticket(replies, with_count=True):
+            row = {"key": "RBT-9", "summary": "t",
+                   "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
+                   "issueType": {"name": "Task"}}
+            if with_count:
+                row["comment"] = {"total": replies}
+            return row
+
+        def generation(replies, previous, at=NOW, with_count=True):
+            items = attention.items_from_jira([ticket(replies, with_count)])
+            return attention.payload(attention.build_view(items, now=at), previous=previous, now=at)
+
+        def the_card(payload):
+            return next(r for t in payload["tiers"] for r in t["items"] if r["ref"] == "RBT-9")
+
+        first = generation(2, None)
+        second = generation(2, first)
+        self.assertEqual(second["changes"]["summary"]["moved"], 0)     # same count: nothing landed
+        self.assertEqual(the_card(second)["comment_count"], 2)
+
+        third = generation(3, second, at=NOW + timedelta(hours=1))
+        self.assertEqual(third["changes"]["summary"]["moved"], 1)
+        self.assertEqual(third["changes"]["items"]["RBT-9"]["label"], "a reply landed")
+        moved = the_card(third)
+        self.assertEqual(moved["lastChangedAt"], "2026-09-29T13:00:00Z")
+        self.assertEqual((moved["section"], moved["states"][0]["key"]), ("waiting", "in-progress"))
+
+        # a read that never asked for comments sets the baseline, never a move
+        plain = attention.payload(attention.build_view(
+            attention.items_from_jira([ticket(2, with_count=False)]), now=NOW), now=NOW)
+        self.assertNotIn("comment_count", the_card(plain))
+        arriving = generation(2, plain)                     # the count arrives: a baseline
+        self.assertEqual(arriving["changes"]["summary"]["moved"], 0)
+        self.assertEqual(the_card(arriving)["comment_count"], 2)
+        self.assertEqual(generation(3, arriving, at=NOW + timedelta(hours=1))
+                         ["changes"]["summary"]["moved"], 1)   # and from there, a reply moves it
+
     def test_a_card_moving_into_the_closed_log_moves_its_children_too(self):
         """The closed log holds a merged PR with the issue it closes as a child.
         That child rode out of the tiers with its parent, so the diff moves it —

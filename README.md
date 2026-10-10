@@ -161,6 +161,10 @@ tier          needs | ready | waiting — the row's own tier, from its own state
 section       needs | ready | waiting | drafts | closed — where the row is rendered
 children      linked items folded into this card (issue <-> PR <-> Jira)
 change        {kind: new|moved, label, from_*/to_*} — THIS generation only
+comment_count how many comments the source's read carried (Jira: `comment.total`); a
+              reply landing is a move — label `a reply landed` — which is the change
+              an acknowledged card wakes on. Absent on rows whose source collects no
+              comments, and those rows never move on one
 firstSeenAt   when the row first appeared; durable across generations
 lastChangedAt when it last moved tier/state/section; durable
 lastChange    that move, kept so a surface can label it later
@@ -295,7 +299,9 @@ styling up on hover:
   computed in the reader's own timezone and the server is handed the moment.
 - **until it changes** — acknowledged: hidden while the card has not moved, and
   back on the board the moment `lastChangedAt` passes your ack. This is the one
-  for recurring noise you already know about.
+  for recurring noise you already know about. A **reply** counts as a move: on a
+  Jira ticket the comment count is what says one landed (the status never shows
+  it), on a GitHub issue or PR the state itself already carries who spoke last.
 
 Parked cards leave the tiers (and any fold) and collect in one collapsed
 **Parked** fold, both kinds together and each row with its own `wake` / `unack`.

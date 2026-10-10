@@ -118,6 +118,10 @@ JIRA_JQL = ("assignee = currentUser() AND (statusCategory != Done OR "
             + " OR ".join(f'status = "{s}"' for s in DEPLOY_STATUSES)
             + ") ORDER BY updated DESC")
 JIRA_FIELDS = ("summary,status,issuetype,description,updated,created,project,assignee,issuelinks")
+# The open read asks for the comments too, and the count is all it takes from
+# them: Jira's status never shows a reply, so how many comments a ticket carries
+# is the only witness that somebody wrote to you (see `_replied`).
+JIRA_OPEN_FIELDS = JIRA_FIELDS + ",comment"
 # statuscategorychangeddate = when the ticket entered the Done category.
 JIRA_CLOSED_FIELDS = JIRA_FIELDS + ",statuscategorychangeddate"
 # The inward text of the link type that holds a ticket up: the linked issue is
@@ -237,7 +241,7 @@ def _row(item, now):
     states = item.get("states") or ["waiting"]
     chips = [_state(s) for s in states]
     tier = next((t for t, _ in TIERS if t in [c["tier"] for c in chips]), WAITING)
-    return {
+    row = {
         "chip": item.get("chip", ""),
         "key": _item_key(item),
         "title": item.get("title", ""),
@@ -264,6 +268,9 @@ def _row(item, now):
         "_updated": _utc(item.get("times", {}).get("updated")),
         "_rank": [t for t, _ in TIERS].index(tier),
     }
+    if item.get("comment_count") is not None:
+        row["comment_count"] = item["comment_count"]
+    return row
 
 
 def _item_key(item):
@@ -391,11 +398,27 @@ def _row_tier(row):
     return WAITING
 
 
+def _replied(was_row, row):
+    """How the card's comment count moved since the previous snapshot: +1 when a
+    reply landed, -1 when one went, 0 when nothing about it changed.
+
+    A reply is a change to the card, and on Jira it is the only one the status
+    cannot show — which is exactly the change an ack should wake for. It is a
+    witness only when the row it is compared against carried a count as well:
+    the first snapshot after this rule sets the baseline, instead of calling
+    every ticket somebody has ever commented on newly changed."""
+    before, after = was_row.get("comment_count"), row.get("comment_count")
+    if before is None or after is None or before == after:
+        return 0
+    return 1 if after > before else -1
+
+
 def _move_label(was_row, row):
     """Human summary of a move: the state change when there is one, the tier
-    change otherwise (a second state — conflicts — can move a row alone).
-    A section-only move (a merged card leaving the closed log) has neither, and
-    must not read as 'Ready when you are → Ready when you are'."""
+    change otherwise (a second state — conflicts — can move a row alone), a reply
+    when neither moved. A section-only move (a merged card leaving the closed
+    log) has none of them, and must not read as 'Ready when you are → Ready when
+    you are'."""
     from_label, to_label = _row_state_label(was_row), _row_state_label(row)
     if from_label != to_label:
         return f"{from_label} → {to_label}"
@@ -403,6 +426,8 @@ def _move_label(was_row, row):
     if from_tier != to_tier:
         titles = dict(TIERS)
         return f"{titles.get(from_tier, from_tier)} → {titles.get(to_tier, to_tier)}"
+    if _replied(was_row, row) > 0:
+        return "a reply landed"
     return "moved"
 
 
@@ -471,7 +496,7 @@ def with_changes(view, previous=None, now=None):
             if was_row.get("lastChange"):
                 row["lastChange"] = was_row["lastChange"]
             if (_row_state(was_row), _row_tier(was_row), was_section) == \
-                    (_row_state(row), _row_tier(row), section):
+                    (_row_state(row), _row_tier(row), section) and not _replied(was_row, row):
                 continue
             row["change"] = {
                 "kind": "moved",
@@ -519,7 +544,7 @@ def payload(view, previous=None, now=None):
 
 def _item(chip, *, source="github", key="", container="", ref="", title="", url="", author="",
           jira="", links=None, blocked_by=(), linked=(), states=(), detail="", facts=(), labels=(), times=None,
-          draft=False):
+          draft=False, comments=None):
     """The one item shape every adapter emits, and only what its source has.
     Tier, label and tone come later from `states` — never here."""
     item = {
@@ -543,6 +568,11 @@ def _item(chip, *, source="github", key="", container="", ref="", title="", url=
     }
     if key:
         item["key"] = key
+    # Only a source that actually collected them carries the count: a row without
+    # it can never move on a comment, which is what keeps every other source's
+    # changes exactly as they were.
+    if comments is not None:
+        item["comment_count"] = int(comments)
     return item
 
 
@@ -785,6 +815,15 @@ def _jira_linked_keys(row):
     return out
 
 
+def _jira_comment_count(row):
+    """The ticket's comment count, off the read itself (`comment.total`) — the
+    bodies are not collected, and this is the one number that says a reply
+    landed. None when the read did not ask for comments, so a Jira read that
+    leaves the field out is not a ticket with no replies."""
+    comment = row.get("comment")
+    return comment.get("total") if isinstance(comment, dict) else None
+
+
 def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None):
     """A Jira row -> the item every Jira card shares. The two callers differ only
     in what they say about the ticket: its states, its detail line, its facts, and
@@ -797,6 +836,7 @@ def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None)
         links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc))
               + _jira_linked_keys(row),
         blocked_by=blocked_by, linked=_jira_links(row), states=states, detail=detail, facts=facts,
+        comments=_jira_comment_count(row),
         times={"updated": _iso(updated or row.get("updated")), "created": _iso(row.get("created"))})
 
 
@@ -1142,7 +1182,7 @@ def collect_view(me=None, cli=None):
         found = []
         try:
             data = cli.json("twg", ["jira", "workitem", "query", "--jql", JIRA_JQL, "--limit", "100",
-                                    "--fields", JIRA_FIELDS,
+                                    "--fields", JIRA_OPEN_FIELDS,
                                     "--output", "json", "--output-summary", "none"])["data"]
             found = items_from_jira(data["issues"] if isinstance(data, dict) else data)
         except Exception as e:

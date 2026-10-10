@@ -507,6 +507,10 @@ assert.equal(view.changeLabel({ kind: 'gone' }), 'dropped');
 assert.equal(view.changeLabel({ kind: 'moved', to_tier: 'needs', label: 'a → b' }), 'a → b');
 assert.equal(view.changeTone({ kind: 'moved', to_tier: 'needs' }), 'moved');
 assert.equal(view.changeTone({ kind: 'moved', to_tier: 'ready' }), 'moved out');
+assert.equal(view.changeTone({ kind: 'moved', from_tier: 'waiting', to_tier: 'waiting' }), 'moved',
+  'a move that kept its tier — a reply landing — left nothing: amber, not green');
+assert.equal(view.changeTone({ kind: 'moved', from_tier: 'needs', to_tier: 'needs' }), 'moved',
+  'and a card that stays in Needs has not moved out of it');
 assert.equal(view.changeClass({ kind: 'moved', to_tier: 'needs' }), ' chg-moved');
 assert.equal(view.changeClass({ kind: 'moved', to_tier: 'ready' }), ' chg-moved out');
 assert.equal(view.changeClass({ kind: 'gone' }), ' chg-gone');

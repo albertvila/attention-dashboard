@@ -412,9 +412,13 @@
       { value: 'ack', label: 'until it changes' },
     ];
     const changeLabel = f => f.kind === 'new' ? 'new' : f.kind === 'gone' ? 'dropped' : (f.label || 'changed');
-    // a move out of the needs tier reads green; into it, amber.
+    // A move out of the needs tier reads green; into it, amber. A move that kept
+    // its tier — a reply landing on a Jira ticket — left nothing, so it is amber
+    // like any other change rather than green.
     const changeTone = f => !f ? ''
-      : (f.kind === 'moved' ? (f.to_tier === 'needs' ? 'moved' : 'moved out') : f.kind);
+      : (f.kind === 'moved'
+        ? (f.to_tier !== f.from_tier && f.to_tier !== 'needs' ? 'moved out' : 'moved')
+        : f.kind);
     const changeClass = f => !f ? '' : ' chg-' + changeTone(f);
 
     return {

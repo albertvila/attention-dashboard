@@ -151,11 +151,13 @@ def issue_node(view, links):
     }
 
 
-def jira_row(key, summary, status="In Progress", category="In Progress"):
-    """One twg workitem row, with the fields the producer reads."""
+def jira_row(key, summary, status="In Progress", category="In Progress", comments=0):
+    """One twg workitem row, with the fields the producer reads — `comment.total`
+    among them, which is what the open read takes from a ticket's comments."""
     return {"key": key, "summary": summary,
             "status": {"name": status, "statusCategory": {"name": category}},
             "issuetype": {"name": "Task"}, "description": None,
+            "comment": {"total": comments},
             "updated": "2026-09-28T10:00:00.000+0200", "created": "2026-09-18T10:00:00.000+0200",
             "url": attention.JIRA_BASE + key}
 
@@ -212,7 +214,7 @@ def fixture_recording(drop=()):
                                 "--output", "json", "--output-summary", "none"],
                         {"data": [jira_row(k, f"{k} ticket") for k in jira_keys if k != "BIT-9002"]}))
     calls.append(answer("twg", ["jira", "workitem", "query", "--jql", attention.JIRA_JQL,
-                                "--limit", "100", "--fields", attention.JIRA_FIELDS,
+                                "--limit", "100", "--fields", attention.JIRA_OPEN_FIELDS,
                                 "--output", "json", "--output-summary", "none"], {"data": JIRA_OPEN}))
     calls.append(answer("twg", ["jira", "workitem", "query", "--jql", attention.JIRA_CLOSED_JQL,
                                 "--limit", "100", "--fields", attention.JIRA_CLOSED_FIELDS,
