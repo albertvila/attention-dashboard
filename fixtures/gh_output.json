@@ -1,0 +1,768 @@
+{
+ "issue_linked_prs": {
+  "acme/checkout-api#331": {
+   "closedByPullRequestsReferences": {
+    "nodes": []
+   },
+   "parent": null,
+   "subIssues": {
+    "nodes": [
+     {
+      "number": 332,
+      "state": "OPEN",
+      "title": "retry one document from the scheduled backfill",
+      "url": "https://github.com/acme/checkout-api/issues/332"
+     }
+    ]
+   }
+  },
+  "acme/checkout-api#332": {
+   "closedByPullRequestsReferences": {
+    "nodes": [
+     {
+      "number": 335,
+      "state": "OPEN",
+      "title": "feat: #332 trim the crawler payload before storing it",
+      "url": "https://github.com/acme/checkout-api/pull/335"
+     }
+    ]
+   },
+   "parent": {
+    "number": 331,
+    "state": "OPEN",
+    "title": "retry one document from the scheduled backfill",
+    "url": "https://github.com/acme/checkout-api/issues/331"
+   },
+   "subIssues": {
+    "nodes": []
+   }
+  }
+ },
+ "issue_view": {
+  "acme/checkout-api#331": {
+   "comments": [
+    {
+     "author": {
+      "login": "you"
+     },
+     "authorAssociation": "MEMBER",
+     "body": "## Plan\n\n**Flow:** one worktree, one agent per ticket\n\n- **#332** \u2014 retry one document\n- **#333** \u2014 wire the retry into the scheduler\n\nDecisions: idempotency by document id.",
+     "createdAt": "2026-09-25T07:28:48Z",
+     "id": "ZmFrZUlkZmFrZUlkZmFrZUlkZ",
+     "includesCreatedEdit": false,
+     "isMinimized": false,
+     "minimizedReason": "",
+     "reactionGroups": [],
+     "url": "https://github.com/acme/checkout-api/issues/331#issuecomment-5828625743",
+     "viewerDidAuthor": true
+    },
+    {
+     "author": {
+      "login": "you"
+     },
+     "authorAssociation": "MEMBER",
+     "body": "## Run summary\n\nOrchestrated run for this item: one ticket, finished in 22 minutes.\n\n| item | state |\n|---|---|\n| #332 | done |\n\nNothing left open.",
+     "createdAt": "2026-09-25T08:15:51Z",
+     "id": "ZmFrZUlkZmFrZUlkZmFrZUlkZ",
+     "includesCreatedEdit": false,
+     "isMinimized": false,
+     "minimizedReason": "",
+     "reactionGroups": [],
+     "url": "https://github.com/acme/checkout-api/issues/331#issuecomment-5829196904",
+     "viewerDidAuthor": true
+    }
+   ],
+   "createdAt": "2026-09-24T09:30:45Z",
+   "number": 331,
+   "title": "retry one document from the scheduled backfill",
+   "updatedAt": "2026-09-25T08:15:51Z",
+   "url": "https://github.com/acme/checkout-api/issues/331",
+   "labels": [
+    {
+     "id": "ZmFrZUlkZmFrZUlkZmFrZUlkZ",
+     "name": "spec",
+     "description": "Context and decisions; never implement directly \u2014 work its child tickets",
+     "color": "7057FF"
+    }
+   ]
+  },
+  "acme/checkout-api#332": {
+   "comments": [
+    {
+     "author": {
+      "login": "you"
+     },
+     "authorAssociation": "MEMBER",
+     "body": "Settled: **done** \u2014 implemented, tests and lint green, review clean.\n\n- One worktree, one agent\n- The scheduler path was already idempotent",
+     "createdAt": "2026-09-25T08:15:45Z",
+     "id": "ZmFrZUlkZmFrZUlkZmFrZUlkZ",
+     "includesCreatedEdit": true,
+     "isMinimized": false,
+     "minimizedReason": "",
+     "reactionGroups": [],
+     "url": "https://github.com/acme/checkout-api/issues/332#issuecomment-5829195481",
+     "viewerDidAuthor": true
+    }
+   ],
+   "createdAt": "2026-09-24T09:36:05Z",
+   "number": 332,
+   "title": "retry one document from the scheduled backfill",
+   "updatedAt": "2026-09-25T08:38:33Z",
+   "url": "https://github.com/acme/checkout-api/issues/332",
+   "labels": [
+    {
+     "id": "ZmFrZUlkZmFrZUlkZmFrZUlkZ",
+     "name": "ticket",
+     "description": "Executable unit sliced from a spec; the grabbable unit of work",
+     "color": "C2E0C6"
+    }
+   ]
+  }
+ },
+ "me": "you",
+ "pr_checks": {
+  "acme/web-frontend#1933": [
+   {
+    "bucket": "pass",
+    "name": "Security scan / Update pull request",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Result",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (shorts)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (metrics)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (videos)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (rights)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (reports)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (audio)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (model-health)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (assets)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (webCrawler)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (social-posts)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (docs)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Run sonarqube over sonar project properties (./docs/sonar-project.properties)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over dotnet projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over gradle projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Print all previous outputs",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Find Workflows",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Detect project scan types",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Run Gitleaks scanner",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Reports integration tests",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "\ud83d\udd0d Result",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Unit tests",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "\ud83d\udd0d Changed directories",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/filecheck",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/filecheck/you",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/filecheck/you/ff16ea3a0e002cfe1fad03c0065dd2bf7b98acfc..2b36ce4e89a21310159592147d27025948a30219",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/projectCheck",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/projectCheck/you/ff16ea3a0e002cfe1fad03c0065dd2bf7b98acfc..2b36ce4e89a21310159592147d27025948a30219",
+    "state": "SUCCESS"
+   }
+  ],
+  "acme/checkout-api#334": [
+   {
+    "bucket": "pass",
+    "name": "\ud83d\udd0d Unit Tests Result",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Result",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Update pull request",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Print all previous outputs",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over gradle projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over sonar project properties",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over dotnet projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (services/api)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (services/sync)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Unit tests (services/api) / Build and test",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "\ud83d\udd0d Changed directories",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Detect project scan types",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Run Gitleaks scanner",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Find Workflows",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/filecheck/you",
+    "state": "SUCCESS"
+   }
+  ],
+  "acme/checkout-api#335": [
+   {
+    "bucket": "pass",
+    "name": "\ud83d\udd0d Unit Tests Result",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Unit tests (services/api) / Build and test",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "\ud83d\udd0d Changed directories",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Result",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Update pull request",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Print all previous outputs",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over dotnet projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over sonar project properties",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "skipping",
+    "name": "Security scan / Run sonarqube over gradle projects",
+    "state": "SKIPPED"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (services/sync)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Validate (services/api)",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Detect project scan types",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Security scan / Run Gitleaks scanner",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "Validate workflows / Find Workflows",
+    "state": "SUCCESS"
+   },
+   {
+    "bucket": "pass",
+    "name": "ci/filecheck/you",
+    "state": "SUCCESS"
+   }
+  ]
+ },
+ "pr_review_threads": {
+  "acme/web-frontend#1933": {
+   "reviewThreads": {
+    "nodes": [
+     {
+      "isResolved": false,
+      "comments": {
+       "nodes": [
+        {
+         "author": {
+          "login": "you"
+         },
+         "body": "Agreed \u2014 but it runs the other way round, no?\n\nFrom v1 to v3, then v1 to v4.\n\n(the naming is confusing)"
+        }
+       ]
+      }
+     },
+     {
+      "isResolved": true,
+      "comments": {
+       "nodes": [
+        {
+         "author": {
+          "login": "reviewer-three"
+         },
+         "body": "Agreed \u2014 but it runs the other way round, no?\n\nFrom v1 to v3, then v1 to v4.\n\n(the naming is confusing)"
+        }
+       ]
+      }
+     },
+     {
+      "isResolved": true,
+      "comments": {
+       "nodes": [
+        {
+         "author": {
+          "login": "you"
+         },
+         "body": "Agreed \u2014 but it runs the other way round, no?\n\nFrom v1 to v3, then v1 to v4.\n\n(the naming is confusing)"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "acme/checkout-api#334": {
+   "reviewThreads": {
+    "nodes": []
+   }
+  },
+  "acme/checkout-api#335": {
+   "reviewThreads": {
+    "nodes": [
+     {
+      "isResolved": false,
+      "comments": {
+       "nodes": [
+        {
+         "author": {
+          "login": "review-bot"
+         },
+         "body": "**[NIT]** **confidence 55%** - docstring doesn't mention the new `retry` behaviour\n\n---\n\n**Why:** the docstring still describes the old single-run path."
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "pr_view": {
+  "acme/web-frontend#1933": {
+   "createdAt": "2026-07-22T06:47:20Z",
+   "headRefOid": "9758e0d0bac095bf414b6fe43a6159a63fc82922",
+   "isDraft": true,
+   "mergeStateStatus": "DIRTY",
+   "number": 1933,
+   "reviewDecision": "REVIEW_REQUIRED",
+   "state": "OPEN",
+   "title": "refactor: RBT-9001 add speaker labels to the audio etl",
+   "updatedAt": "2026-08-11T15:15:11Z",
+   "url": "https://github.com/acme/web-frontend/pull/1933",
+   "headRefName": "m-feature-add_speaker_labels_to_the_audio_etl-RBT-9001",
+   "author": {
+    "login": "you",
+    "name": "You"
+   }
+  },
+  "acme/checkout-api#334": {
+   "createdAt": "2026-09-25T07:27:47Z",
+   "headRefOid": "a25281440a5f5fc317dc5e8e73645984acb08de2",
+   "isDraft": false,
+   "mergeStateStatus": "CLEAN",
+   "number": 334,
+   "reviewDecision": "APPROVED",
+   "state": "OPEN",
+   "title": "chore: FIRE-9001 separate parse from version migration",
+   "updatedAt": "2026-09-25T08:11:23Z",
+   "url": "https://github.com/acme/checkout-api/pull/334",
+   "headRefName": "m-feature-separate_parse_from_version_migration-FIRE-9001",
+   "author": {
+    "login": "you",
+    "name": "You"
+   }
+  },
+  "acme/checkout-api#335": {
+   "createdAt": "2026-09-25T08:38:23Z",
+   "headRefOid": "c2803eaf98a6bffdde1e33dfa7de7b980765c157",
+   "isDraft": false,
+   "mergeStateStatus": "BLOCKED",
+   "number": 335,
+   "reviewDecision": "",
+   "state": "OPEN",
+   "title": "feat: #332 trim the crawler payload before storing it",
+   "updatedAt": "2026-09-28T13:55:57Z",
+   "url": "https://github.com/acme/checkout-api/pull/335",
+   "closingIssuesReferences": [
+    {
+     "number": 332,
+     "url": "https://github.com/acme/checkout-api/issues/332",
+     "repository": {
+      "name": "checkout-api",
+      "owner": {
+       "login": "acme"
+      }
+     }
+    }
+   ]
+  }
+ },
+ "search_assignee": [
+  {
+   "commentsCount": 1,
+   "createdAt": "2026-09-24T09:36:05Z",
+   "number": 332,
+   "repository": {
+    "name": "checkout-api",
+    "nameWithOwner": "acme/checkout-api"
+   },
+   "title": "retry one document from the scheduled backfill",
+   "updatedAt": "2026-09-25T08:38:33Z",
+   "url": "https://github.com/acme/checkout-api/issues/332"
+  },
+  {
+   "commentsCount": 2,
+   "createdAt": "2026-09-24T09:30:45Z",
+   "number": 331,
+   "repository": {
+    "name": "checkout-api",
+    "nameWithOwner": "acme/checkout-api"
+   },
+   "title": "retry one document from the scheduled backfill",
+   "updatedAt": "2026-09-25T08:15:51Z",
+   "url": "https://github.com/acme/checkout-api/issues/331"
+  }
+ ],
+ "search_author": [
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "you",
+    "type": "User",
+    "url": "https://github.com/you"
+   },
+   "commentsCount": 5,
+   "createdAt": "2026-09-25T08:38:24Z",
+   "isDraft": false,
+   "number": 335,
+   "repository": {
+    "name": "checkout-api",
+    "nameWithOwner": "acme/checkout-api"
+   },
+   "title": "feat: #332 trim the crawler payload before storing it",
+   "updatedAt": "2026-09-28T13:55:57Z",
+   "url": "https://github.com/acme/checkout-api/pull/335"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "you",
+    "type": "User",
+    "url": "https://github.com/you"
+   },
+   "commentsCount": 1,
+   "createdAt": "2026-09-25T07:27:47Z",
+   "isDraft": false,
+   "number": 334,
+   "repository": {
+    "name": "checkout-api",
+    "nameWithOwner": "acme/checkout-api"
+   },
+   "title": "chore: FIRE-9001 separate parse from version migration",
+   "updatedAt": "2026-09-25T08:11:23Z",
+   "url": "https://github.com/acme/checkout-api/pull/334"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "you",
+    "type": "User",
+    "url": "https://github.com/you"
+   },
+   "commentsCount": 1,
+   "createdAt": "2026-07-22T06:47:20Z",
+   "isDraft": true,
+   "number": 1933,
+   "repository": {
+    "name": "web-frontend",
+    "nameWithOwner": "acme/web-frontend"
+   },
+   "title": "refactor: RBT-9001 add speaker labels to the audio etl",
+   "updatedAt": "2026-08-11T15:15:11Z",
+   "url": "https://github.com/acme/web-frontend/pull/1933"
+  }
+ ],
+ "search_review_requested": [
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "dependabot[bot]",
+    "type": "Bot",
+    "url": "https://github.com/apps/dependabot"
+   },
+   "commentsCount": 0,
+   "createdAt": "2026-09-28T22:03:35Z",
+   "isDraft": false,
+   "number": 2707,
+   "repository": {
+    "name": "edge-workers",
+    "nameWithOwner": "acme/edge-workers"
+   },
+   "title": "build(deps): bump undici in /packages/module",
+   "updatedAt": "2026-09-28T22:03:37Z",
+   "url": "https://github.com/acme/edge-workers/pull/2707"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "dependabot[bot]",
+    "type": "Bot",
+    "url": "https://github.com/apps/dependabot"
+   },
+   "commentsCount": 0,
+   "createdAt": "2026-09-25T17:05:58Z",
+   "isDraft": false,
+   "number": 2032,
+   "repository": {
+    "name": "web-frontend",
+    "nameWithOwner": "acme/web-frontend"
+   },
+   "title": "chore(deps): surface the sync lag on the board",
+   "updatedAt": "2026-09-25T17:06:01Z",
+   "url": "https://github.com/acme/web-frontend/pull/2032"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "dependabot[bot]",
+    "type": "Bot",
+    "url": "https://github.com/apps/dependabot"
+   },
+   "commentsCount": 4,
+   "createdAt": "2026-06-14T08:28:17Z",
+   "isDraft": false,
+   "number": 2508,
+   "repository": {
+    "name": "edge-workers",
+    "nameWithOwner": "acme/edge-workers"
+   },
+   "title": "build(deps): bump esbuild, @vitest/coverage-v8, tsx, serverless-esbuild, vite and vitest in /packages/module",
+   "updatedAt": "2026-07-22T08:42:22Z",
+   "url": "https://github.com/acme/edge-workers/pull/2508"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "reviewer-one",
+    "type": "User",
+    "url": "https://github.com/reviewer-one"
+   },
+   "commentsCount": 0,
+   "createdAt": "2026-09-28T07:34:31Z",
+   "isDraft": false,
+   "number": 2703,
+   "repository": {
+    "name": "edge-workers",
+    "nameWithOwner": "acme/edge-workers"
+   },
+   "title": "separate parse from version migration",
+   "updatedAt": "2026-09-28T14:35:41Z",
+   "url": "https://github.com/acme/edge-workers/pull/2703"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "reviewer-two",
+    "type": "User",
+    "url": "https://github.com/reviewer-two"
+   },
+   "commentsCount": 1,
+   "createdAt": "2026-09-22T08:42:27Z",
+   "isDraft": false,
+   "number": 2018,
+   "repository": {
+    "name": "web-frontend",
+    "nameWithOwner": "acme/web-frontend"
+   },
+   "title": "feat: BIT-9001 trim the crawler payload before storing it",
+   "updatedAt": "2026-09-24T05:00:10Z",
+   "url": "https://github.com/acme/web-frontend/pull/2018",
+   "headRefName": "m-feature-drop_the_legacy_notebook_scripts-BIT-9001"
+  },
+  {
+   "author": {
+    "id": "ZmFrZUlkZmFr",
+    "is_bot": false,
+    "login": "ci-service",
+    "type": "User",
+    "url": "https://github.com/ci-service"
+   },
+   "commentsCount": 7,
+   "createdAt": "2026-09-22T03:22:44Z",
+   "isDraft": false,
+   "number": 2017,
+   "repository": {
+    "name": "web-frontend",
+    "nameWithOwner": "acme/web-frontend"
+   },
+   "title": "feat: BIT-9002 surface the sync lag on the board",
+   "updatedAt": "2026-09-28T10:03:56Z",
+   "url": "https://github.com/acme/web-frontend/pull/2017"
+  }
+ ]
+}
