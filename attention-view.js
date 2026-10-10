@@ -375,7 +375,7 @@
       const c = counts();
       const sentence = !since ? 'first look \u00b7 nothing to compare'
         : c.new + ' new \u00b7 ' + c.changed + ' changed \u00b7 ' + c.gone + ' dropped '
-          + (seenAt ? 'since your last look (' + new Date(seenAt).toLocaleTimeString() + ')'
+          + (seenAt ? 'since your last look (' + new Date(seenAt).toLocaleTimeString([], { hour12: false }) + ')'
                     : 'since the previous snapshot');
       // Silence is a number, not a feeling: how many cards you can act on have
       // nothing to say from what has been read. Nothing to say, nothing said.
@@ -393,7 +393,7 @@
       return all.filter(r => { const f = flagOf(r, since); return f && f.kind === 'moved'; });
     }
 
-    const formatWhen = iso => 'until ' + new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    const formatWhen = iso => 'until ' + new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
     /* Four of the choices are moments, not offsets: 09:00 tomorrow and 09:00
        next Monday, on the reader's own clock. The instant is computed here
        because this is the only place that knows the reader's timezone — the
