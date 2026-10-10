@@ -262,7 +262,8 @@ class JiraEnrichment(unittest.TestCase):
     def test_a_key_the_answer_left_out_is_the_key_missing(self):
         """JQL quietly leaves out a key that does not exist, so nothing about the
         query failing: that key is the one with no ticket."""
-        guess = attention._item("", source="mail", jira="https://x/browse/UTF-8")
+        guess = attention._item("", jira="https://x/browse/UTF-8")
+        guess["jira_guess"] = True                       # a key read off a title, not a link
         errors = []
         attention._with_jira([guess], errors, fetch=lambda keys: {})
         self.assertEqual(errors, [])
@@ -992,8 +993,6 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(seen[-1], ["gh", "search", "issues", "--assignee=teammate-one"])
         self.assertEqual(cli.text("twg", ["jira", "query", "assignee = currentUser()"]), "{}")
         self.assertEqual(seen[-1][-1], 'assignee = "abc"')
-        with self.assertRaises(attention.CliError):
-            cli.text("gmcli", ["x"])
 
         # No account to read as: the who-am-I sources stand down, but a read by
         # key is the same ticket for anyone, so it still goes through.
@@ -1016,10 +1015,10 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual([e["where"] for e in broken["errors"]],
                          ["herdr sessions", "bb sessions"])   # a real break still says so
 
-        absent = attention._error("mail", FileNotFoundError(2, "No such file or directory", "gmcli"))
-        self.assertEqual(absent["missing"], "gmcli")
-        self.assertNotIn("missing", attention._error("mail", attention.CliError("gmcli x", "auth expired")))
-        self.assertNotIn("missing", attention._error("mail", ValueError("bad json")))
+        absent = attention._error("jira tasks", FileNotFoundError(2, "No such file or directory", "twg"))
+        self.assertEqual(absent["missing"], "twg")
+        self.assertNotIn("missing", attention._error("jira tasks", attention.CliError("twg x", "auth expired")))
+        self.assertNotIn("missing", attention._error("jira tasks", ValueError("bad json")))
 
     def test_a_pane_is_a_session_per_repo_with_its_own_tab(self):
         cli = self.Fake(panes=[self.pane()],
@@ -1247,112 +1246,6 @@ class TheWriters(unittest.TestCase):
             stop.set()
             thread.join()
         self.assertEqual(sorted(os.listdir(directory)), ["attention.json"])
-
-
-class MailSource(unittest.TestCase):
-    """gmcli threads -> cards; stars are the gate, group/ labels merge."""
-
-    THREADS = [{"id": "t1", "messages": [
-        {"id": "m1", "threadId": "t1", "labelIds": ["INBOX", "STARRED", "Label_g1"],
-         "snippet": "first &amp; older", "internalDate": "1790764004000",
-         "from": '"Antoni Parramon Naranjo" <antoni@example.com>',
-         "subject": "[JIRA] Antoni mentioned you on FIRE-72208", "hasAttachments": False},
-        {"id": "m2", "threadId": "t1", "labelIds": ["INBOX", "STARRED", "UNREAD", "Label_g1"],
-         "snippet": "second &amp; newer", "internalDate": "1790775262000",
-         "from": '"Antoni Parramon Naranjo" <antoni@example.com>',
-         "subject": "Re: [JIRA] Antoni mentioned you on FIRE-72208", "hasAttachments": True},
-    ]}]
-
-    def test_thread_becomes_a_card(self):
-        item = attention.items_from_mail(self.THREADS, {"Label_g1": "group/summit"})[0]
-        self.assertEqual(item["key"], "mail/t1")
-        self.assertEqual(item["chip"], "MAIL")
-        self.assertEqual(item["states"], ["needs-reply"])
-        self.assertEqual(item["author"], "Antoni Parramon Naranjo")
-        self.assertEqual(item["jira"], attention.JIRA_BASE + "FIRE-72208")
-        self.assertEqual(item["links"], ["group/summit"])
-        self.assertEqual([f["label"] for f in item["facts"]],
-                         ["unread", "2 messages", "attachment", "group/summit"])
-        self.assertEqual(item["detail"], "second & newer")
-        self.assertEqual(item["times"], {"updated": "2026-09-30T13:34:22Z",
-                                          "created": "2026-09-30T10:26:44Z"})
-        self.assertIn("authuser=you%40launchmetrics.com", item["url"])
-        self.assertTrue(item["url"].endswith("#all/t1"))
-
-    def test_no_group_label_means_no_link(self):
-        self.assertEqual(attention.items_from_mail(self.THREADS)[0]["links"], [])
-
-    def test_the_badge_follows_who_sent_the_last_message(self):
-        """The star is membership and nothing else; the state is the last From
-        compared with the mailbox account."""
-
-        def card(sender):
-            return attention.items_from_mail([{"id": "t1", "messages": [
-                {"id": "m1", "threadId": "t1", "labelIds": ["INBOX", "STARRED"],
-                 "snippet": "first", "internalDate": "1790764004000",
-                 "from": '"Antoni" <antoni@example.com>', "subject": "s"},
-                {"id": "m2", "threadId": "t1", "labelIds": ["INBOX", "STARRED"],
-                 "snippet": "last", "internalDate": "1790775262000",
-                 "from": sender, "subject": "Re: s"},
-            ]}])[0]
-
-        mine = card(f'"You" <{attention.MAIL_ACCOUNT}>')
-        self.assertEqual(mine["states"], ["waiting-reply"])
-        self.assertEqual(mine["chip"], "MAIL")          # still the star's card, still mail
-        self.assertEqual(mine["key"], "mail/t1")
-        self.assertEqual(mine["author"], "You")
-        self.assertEqual(card('"Antoni" <antoni@example.com>')["states"], ["needs-reply"])
-        self.assertEqual(card("")["states"], ["needs-reply"])   # no From at all
-
-    def test_group_labels_are_read_from_the_table(self):
-        table = ("ID\tNAME\tTYPE\n"
-                 "Label_g1\tgroup/summit\tuser\n"
-                 "Label_x\tZoom\tuser\n"
-                 "INBOX\tINBOX\tsystem\n")
-        errors = []
-        groups = attention._mail_groups(errors, run=lambda cmd, args: table)
-        self.assertEqual(groups, {"Label_g1": "group/summit"})
-        self.assertEqual(errors, [])
-
-    def test_unresolvable_jira_key_is_not_a_link(self):
-        """Bare KEY-123 in free text matches UTF-8 / SHA-256 too."""
-        items = attention.items_from_mail([{"id": "t9", "messages": [
-            {"id": "m9", "threadId": "t9", "labelIds": ["INBOX", "STARRED"],
-             "snippet": "the payload is UTF-8 encoded", "internalDate": "1790775262000",
-             "from": "a@b.com", "subject": "notes about UTF-8 and SHA-256", "hasAttachments": False}]}])
-        self.assertTrue(items[0]["jira"].endswith("UTF-8"))
-
-        def missing(key):
-            raise RuntimeError(f"no such ticket {key}")
-
-        errors = []
-        attention._with_jira(items, errors, fetch=missing)
-        self.assertEqual(items[0]["jira"], "")
-        self.assertEqual(errors, [])          # a false positive is not a source error
-
-    def test_group_label_failure_only_costs_grouping(self):
-        errors = []
-
-        def boom(cmd, args):
-            raise RuntimeError("gmcli missing")
-
-        self.assertEqual(attention._mail_groups(errors, run=boom), {})
-        self.assertEqual(len(errors), 1)
-        self.assertIn("mail groups", errors[0]["where"])
-
-    def test_threads_sharing_a_group_merge_into_one_card(self):
-        second = {"id": "t2", "messages": [dict(self.THREADS[0]["messages"][0],
-                                                   id="m3", threadId="t2",
-                                                   internalDate="1790780000000")]}
-        items = attention.items_from_mail(self.THREADS + [second], {"Label_g1": "group/summit"})
-        view = attention.build_view(items, now=NOW)
-        cards = [i for t in view["tiers"] for i in t["items"]]
-        self.assertEqual(len(cards), 1)
-        self.assertEqual(cards[0]["tier"], "needs")
-        self.assertEqual([c["key"] for c in cards[0]["children"]], ["mail/t2"])
-        # a mail child has no ref, so its title is what the link renders as
-        self.assertEqual(cards[0]["children"][0]["title"],
-                         "[JIRA] Antoni mentioned you on FIRE-72208")
 
 
 class SnapshotContract(unittest.TestCase):

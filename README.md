@@ -1,6 +1,6 @@
 # Attention dashboard
 
-One attention queue for GitHub, Jira and starred mail, and one JSON snapshot
+One attention queue for GitHub and Jira, and one JSON snapshot
 that every surface renders. `attention.py` owns the rules; `dashboard.html` is a
 consumer, not a copy.
 
@@ -10,17 +10,16 @@ This is a **local, single-user tool**. Everyone runs their own copy, on their ow
 machine, authenticated as themselves: there is no shared server, no deploy, and
 no snapshot anyone else reads. The repo is private — get access first.
 
-Four CLIs, each authenticated as *you*:
+Three CLIs, each authenticated as *you*:
 
 | tool | what it answers for | how to get it |
 |---|---|---|
 | `python3` ≥ 3.9 | the producer and the server | usually already there; check `python3 --version` |
 | `gh` | review requests, own PRs, assigned issues, specs | `gh auth login`, scopes `repo` + `read:org` |
 | `twg` | Jira tickets, statuses, blockers | installed and authenticated (`twg auth`) |
-| `gmcli` | starred mail | `npm i -g @mariozechner/gmcli`, then `gmcli accounts credentials <file.json>` once, then `gmcli accounts add <you@launchmetrics.com>` — check with `gmcli accounts list` |
 
 Not one of them is a hard prerequisite. A missing CLI costs its source and
-nothing else, and the page names the one to add: `⚠ mail is off: gmcli is not
+nothing else, and the page names the one to add: `⚠ jira tasks is off: twg is not
 installed — this queue is partial`. The rest of the queue renders anyway. The
 session rails are the one exception — they just go quiet, because a machine
 without herdr or bb has no sessions to show, which is not a failure.
@@ -28,7 +27,6 @@ without herdr or bb has no sessions to show, which is not a failure.
 Then, from this directory:
 
 ```bash
-export MAIL_ACCOUNT=you@launchmetrics.com    # once — see Configuration
 python3 attention.py                        # server on http://127.0.0.1:8765
 ```
 
@@ -39,22 +37,7 @@ the snapshot it is showing is over an hour old.
 
 ### Configuration
 
-Two environment variables, read at startup:
-
-| variable | default | what it does |
-|---|---|---|
-| `MAIL_ACCOUNT` | `you@launchmetrics.com` | the mailbox `gmcli` searches **and** the address every mail card compares its last sender against |
-| `MAIL_QUERY` | `is:starred -in:trash` | which threads are in the queue — the star is membership, so this is the gate |
-
-**Set `MAIL_ACCOUNT` to the mailbox you added to `gmcli`.** The default is my
-address, and accounts are local to `gmcli`, so leaving it unset fails the mail
-source with `Account 'you@launchmetrics.com' not found` — a partial
-queue, not your mail. It is also the address that decides a card's state: the
-last sender matching it reads `waiting-reply`, anyone else `needs-reply`. Point
-it at a mailbox `gmcli` does not have and you get the error; point it at the
-wrong mailbox and every card reads backwards.
-
-And one file: `config.json`, beside the snapshot. It is read per request, so an
+One file: `config.json`, beside the snapshot. It is read per request, so an
 edit lands on your next look with no restart, and it is gitignored — your knobs
 are yours.
 
@@ -84,8 +67,8 @@ contract, ignorable if it is not your workflow.
 - **A failed source still exits 0.** `python3 attention.py --json …` writes a
   snapshot and succeeds even when every source errored; the only signal is the
   `errors` array inside it, so a cron keyed on exit status never notices.
-- **Ceilings:** the 50 most recent starred threads (`MAIL_MAX` in `attention.py`),
-  100 rows per GitHub search, and the 24h / 7-day windows the contract describes.
+- **Ceilings:** 100 rows per GitHub search, and the 24h / 7-day windows the
+  contract describes.
   Anything past a ceiling is absent, not error-flagged.
 - **The server is unauthenticated.** It serves and writes on `127.0.0.1` only,
   and `/focus` moves windows on this machine — do not bind it to a LAN address.
@@ -161,7 +144,7 @@ Every row carries:
 key           stable identity across snapshots (acme/web-frontend#2040, FIRE-9001)
 links         the keys that clustered this card with others; empty = standalone
 blocked_by    [{key, url, status, status_category, type, summary}] — what Jira says holds this card up; [] when nothing does
-chip          REVIEW | MY PR | ISSUE | JIRA | MAIL | REVIEWED
+chip          REVIEW | MY PR | ISSUE | JIRA | REVIEWED
 title, ref, url, author, container, labels, detail, age
 jira          ticket URL when the branch/item names one; jira_issue = {type,status,status_category,summary}
 states        [{key, label, tier, tone}]  — tone: info|warn|bad|good|quiet
@@ -181,33 +164,9 @@ lastChange    that move, kept so a surface can label it later
 Consumers should render `states`/`facts`/`change` as given and never re-derive
 tiers, labels, tones, or ages — that is the whole point of the contract.
 
-## Mail (gmcli)
+## A card is a cluster
 
-Every starred thread is in the queue, archived ones included:
-`is:starred -in:trash` (override with `MAIL_QUERY`, account with
-`MAIL_ACCOUNT`). Un-star a thread and it drops out on the next refresh —
-archiving does not, and the dashboard never writes to Gmail.
-
-A thread becomes one card (`mail/<threadId>`). The **star is membership and
-nothing else**; the state follows who sent the last message — `waiting-reply`
-when the From address is the mailbox account, `needs-reply` when it is anyone
-else (or missing). Cards render in a **collapsed Starred mail fold** rather
-than the tiers — like drafts — so starred mail never inflates the Needs count;
-expand the fold to read them, and its summary says `oldest <age> · <n> unread`. Otherwise:
-with `unread` / `N messages` / `attachment` as facts, the snippet as detail, and
-a Gmail deep link. A Jira key or GitHub ref in the subject/snippet merges the
-email into that ticket's card; a key that does not resolve is ignored (free text
-matches `UTF-8` and `SHA-256` too).
-
-**Merging threads that are not one Gmail thread**: apply the same
-`group/<name>` label to several threads (multi-select in Gmail) and they become
-one card, named by that label; the header is the most urgent member. Only
-`group/`-prefixed *user* labels group anything — `Zoom`, `Later` and friends are
-ignored — and the star stays the only way into the queue, so a label never
-smuggles an item in. Each dashboard ends with a "How this queue works" section
-that says the same thing.
-
-A card is a cluster: items that reference each other (issue ↔ PR ↔ Jira key) become
+Items that reference each other (issue ↔ PR ↔ Jira key) become
 one card. **Open and closed items cluster together**, so a merged PR stays with its
 ticket instead of splitting into the closed log. The **header** is chosen by kind,
 not by urgency: a Jira ticket if the cluster has one, otherwise a GitHub issue
@@ -297,7 +256,7 @@ styling up on hover:
   back on the board the moment `lastChangedAt` passes your ack. This is the one
   for recurring noise you already know about.
 
-Parked cards leave the tiers (and the Mail fold) and collect in one collapsed
+Parked cards leave the tiers (and any fold) and collect in one collapsed
 **Parked** fold, both kinds together and each row with its own `wake` / `unack`.
 The header line still counts them, so a parked card never disappears silently.
 
@@ -326,7 +285,6 @@ the snapshot's `links` field.
 | GitHub ↔ GitHub | `Closes owner/repo#123` (cross-repo) or `Fixes #123` | PR body — GitHub then reports it as a closing reference |
 | GitHub ↔ GitHub | GitHub **issue/PR URL** | issue/PR body or comment |
 | GitHub ↔ GitHub | sub-issue / parent, or `#123` in a PR **title** or an issue body | GitHub UI — `#1338` under `## Parent` is the link |
-| Mail | Jira key or GitHub URL in subject/snippet; `group/<name>` label | mail text, Gmail label |
 
 Bare keys in prose are ignored on purpose (`UTF-8`, `SHA-256` match the
 `KEY-123` shape) — write the URL, or put the key in the branch name. A card that
@@ -336,8 +294,8 @@ one of the references above.
 ## Consumer rules: one implementation
 
 `attention-view.js` is the only place the *reader-side* rules live — change
-flags, ghosts (hidden in Needs, never for mail or support), the With
-support/Starred mail/Parked folds, the fold summaries (oldest age, unread mail,
+flags, ghosts (hidden in Needs, never for support), the With support and Parked
+folds, the fold summaries (oldest age,
 conflicted drafts, the parked kinds — built from the ages already on the rows,
 never a second calculation), the next-card line an empty Needs tier shows (the
 first Ready card, or nothing when Ready is empty too), and where a card renders.
@@ -413,9 +371,9 @@ from `attention-view.js`.
   author, repository or key, facts, detail — starts at the same edge in every
   card, with age, links and parking at the row's right. Waiting does not
   collapse rows that share a title.
-- **Starred mail**, **With support**, **Parked**, **Drafts** and **Recently
+- **With support**, **Parked**, **Drafts** and **Recently
   closed** are collapsed folds, each showing its count and the description the
-  rules give it (`oldest 3d · 2 unread`, `snoozed until a time, or until the
+  rules give it (`oldest 3d`, `snoozed until a time, or until the
   card changes`, …). A fold the rules have nothing to say about shows its count
   only.
 - A card with linked items carries `N linked` at the row's right, beside age and
@@ -460,5 +418,5 @@ node test_dashboard_sweep.mjs            # the visible-tab sweep — and what a 
 ```
 
 Nothing here touches the network or a live CLI: the seam tests drive a recorded
-adapter in place of `gh`, `twg` and `gmcli`. (`node` for the two `.mjs` suites,
+adapter in place of `gh` and `twg`. (`node` for the two `.mjs` suites,
 `python3` for the unittest modules.)

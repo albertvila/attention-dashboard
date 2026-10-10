@@ -1,6 +1,6 @@
 # Attention queue
 
-One queue for GitHub, Jira and starred mail: sources emit items, linked items
+One queue for GitHub and Jira: sources emit items, linked items
 cluster into one card, cards are classified into tiers, and the whole thing is
 published as one snapshot every surface renders.
 
@@ -9,7 +9,7 @@ published as one snapshot every surface renders.
 ### The queue
 
 **Source**:
-A place signals come from — GitHub, Jira, mail — normalised into items in the
+A place signals come from — GitHub, Jira — normalised into items in the
 same shape regardless of origin.
 _Avoid_: provider, integration, feed
 
@@ -19,7 +19,7 @@ emit.
 _Avoid_: signal, event, entry
 
 **Cluster**:
-The set of items that link to each other by key or share a `group/` label. Open
+The set of items that link to each other by key. Open
 and closed items cluster together.
 _Avoid_: group, thread
 
@@ -56,16 +56,16 @@ the closed section can still hold a "needs" tier.
 _Avoid_: list, group
 
 **Chip**:
-The source badge on a card (REVIEW, MY PR, ISSUE, JIRA, MAIL, REVIEWED).
+The source badge on a card (REVIEW, MY PR, ISSUE, JIRA, REVIEWED).
 _Avoid_: badge (that is a state's pill, not its source)
 
 **Fold**:
 A collapsed home for cards that belong to neither a tier nor the closed log:
-mail, support, drafts, snoozed, acknowledged.
+support, drafts, snoozed, acknowledged.
 
 **With support**:
 The state for a Jira ticket in `Support Investigating`, and the fold it renders
-in. The snapshot keeps the card in the waiting tier; like Mail, the fold is a
+in. The snapshot keeps the card in the waiting tier; the fold is a
 rendering home, not a section.
 _Avoid_: support section, support tier
 

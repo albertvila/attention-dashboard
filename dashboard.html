@@ -8,7 +8,7 @@
   attention-view.js, so no attention rule lives in this file.
 
   One card renderer serves every place a card appears — a Needs block, a Ready
-  line, a Waiting line, a group line, a mail line, a fold line — so a layout
+  line, a Waiting line, a group line, a fold line — so a layout
   cannot drop part of a card.
 
   Served by the producer (http://127.0.0.1:8765/).
@@ -118,7 +118,6 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .chip.MY{background:#23863633;color:#7ee787}
 .chip.ISSUE{background:#d2992233;color:#e3b341}
 .chip.JIRA{background:#8957e533;color:#d2a8ff}
-.chip.MAIL{background:#39c5cf22;color:#76e3ea}
 .chip.mini{font-size:9px;padding:1px 5px}
 .meta{color:#8b949e;font-size:12px;overflow-wrap:anywhere}
 .author,.repo{color:#8b949e;text-decoration:none}
@@ -385,7 +384,6 @@ function render(data){
     app.appendChild(s);
   }
   for(const fold of [['With support', view.folds.support, view.notes.support()],
-                     ['Starred mail', view.folds.mail, view.notes.mail()],
                      ['Parked', view.folds.parked, view.notes.parked()],
                      ['Drafts', view.folds.drafts, view.notes.drafts()],
                      ['Recently closed', view.folds.closed, '']]){
@@ -395,9 +393,8 @@ function render(data){
   app.appendChild(helpBox([
     'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look, then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
     'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, tickets to deploy — and a card whose merged member finished while its ticket or issue still waits, that finished work struck underneath). Waiting on others: you handed off (PRs awaiting review, tickets in progress). When Needs is empty, its line names the next card that could be picked up.',
-    'Mail — every starred thread shows up, archived ones included (is:starred), collected in the collapsed Starred mail fold instead of the tiers. The star is membership and nothing else; the badge follows who sent the last message: waiting reply when that was you, needs reply when it was someone else. Un-star one to clear it; nothing here changes your mail.',
     'Support — a Jira ticket in Support Investigating is waiting on others, and renders in the collapsed With support fold rather than the Waiting queue. Expand the fold to read it.',
-    'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, unread mail, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
+    'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
     'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
@@ -603,8 +600,8 @@ function paintSpecs(){
   watched.forEach(s => specsRail.appendChild(specRow(s)));
 }
 
-/* One card renderer: a Needs block, a Ready line, a Waiting line, a group line,
-   a mail line and a fold line all render from this one function, so every part
+/* One card renderer: a Needs block, a Ready line, a Waiting line, a group line
+   and a fold line all render from this one function, so every part
    the card carries — chip, title, states, facts, labels, detail, the Jira line,
    links, age and parking — is here rather than per layout. The one exception is
    the rules' own 'gone' flag: struck history drops the states and facts that
@@ -796,7 +793,7 @@ const ageOf = iso => {
   return s < 60 ? 'just now' : s < 3600 ? Math.floor(s/60) + 'm ago'
        : s < 86400 ? Math.floor(s/3600) + 'h ago' : Math.floor(s/86400) + 'd ago';
 };
-function chipClass(c){return c==='REVIEW'?'REVIEW':c==='ISSUE'?'ISSUE':c==='JIRA'?'JIRA':c==='MAIL'?'MAIL':c==='REVIEWED'?'REVIEWED':'MY';}
+function chipClass(c){return c==='REVIEW'?'REVIEW':c==='ISSUE'?'ISSUE':c==='JIRA'?'JIRA':c==='REVIEWED'?'REVIEWED':'MY';}
 /* Jira's own status category -> the badge tone the card paints it with. */
 function jiraTone(cat){
   const c = String(cat||'').toLowerCase();

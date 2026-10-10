@@ -82,9 +82,8 @@
     const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || []);
     const gone = (data.changes || {}).gone || [];
 
-    const isMail = row => row.chip === 'MAIL';
     // A Jira card in Support Investigating is waiting in the snapshot, and
-    // folds out of the rendered queue at read time — like mail, not a tier.
+    // folds out of the rendered queue at read time — its own fold, not a tier.
     const isSupport = row => (((row.states || [])[0] || {}).key) === 'with-support';
     const snoozeOf = row => (snoozes[row.key] && snoozes[row.key] > now) ? snoozes[row.key] : null;
     // An ack holds only while the card has not moved since you acknowledged it.
@@ -93,9 +92,9 @@
       return (at && (!row.lastChangedAt || row.lastChangedAt <= at)) ? at : null;
     };
     const parked = row => !!(snoozeOf(row) || ackOf(row));
-    /** Renders in a tier: work that is neither mail (its own fold), support
-        (its own fold) nor parked. */
-    const work = row => !isMail(row) && !isSupport(row) && !parked(row);
+    /** Renders in a tier: work that is neither support (its own fold) nor
+        parked. */
+    const work = row => !isSupport(row) && !parked(row);
 
     // Every key a surface draws live, children included: a parent that vanished
     // while its children survived is the same work twice.
@@ -109,7 +108,7 @@
       // child is still live duplicates them: the live card already names what
       // the parent was, so striking it again is noise.
       if (section === 'needs') return [];
-      return gone.filter(r => r.section === section && !isMail(r) && !isSupport(r)
+      return gone.filter(r => r.section === section && !isSupport(r)
         && !parked(r) && since && r.goneAt > since && !allKidsLive(r));
     }
 
@@ -132,7 +131,6 @@
       .concat(rows.filter(r => ackOf(r) && !snoozeOf(r)));
     const folds = {
       parked: parkedRows,
-      mail: rows.filter(r => isMail(r) && !parked(r)),
       support: rows.filter(r => isSupport(r) && !parked(r)),
       drafts: (data.drafts || []).filter(work).concat(ghosts('drafts')),
       closed: (data.closed || []).filter(work).concat(ghosts('closed')),
@@ -153,9 +151,6 @@
 
     /** Why a collapsed fold is worth opening, one line per fold. */
     const notes = {
-      mail: () => [oldestClause(folds.mail),
-        folds.mail.filter(r => (r.facts || []).some(f => f.label === 'unread')).length + ' unread'
-      ].filter(Boolean).join(' · '),
       drafts: () => [folds.drafts.some(r => (r.states || []).some(s => s.key === 'conflicts')) ? 'conflicts' : '',
         oldestClause(folds.drafts)
       ].filter(Boolean).join(' · '),
@@ -203,7 +198,7 @@
         be a jump to nowhere. */
     function changedRows() {
       const all = tiers.flatMap(t => t.rows)
-        .concat(folds.mail, folds.support, folds.parked, folds.drafts, folds.closed);
+        .concat(folds.support, folds.parked, folds.drafts, folds.closed);
       return all.filter(r => { const f = flagOf(r, since); return f && f.kind === 'moved'; });
     }
 

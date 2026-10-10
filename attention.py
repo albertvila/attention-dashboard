@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attention queue — one queue for GitHub, Jira and starred mail.
+"""Attention queue — one queue for GitHub and Jira.
 
 Run:  python3 attention.py     then open http://127.0.0.1:8765
       python3 attention.py --json attention.json   one shared snapshot
@@ -16,7 +16,6 @@ previous snapshot. Diffing happens here so no consumer re-implements it.
 
 import argparse
 import hashlib
-import html
 import json
 import os
 import re
@@ -26,10 +25,9 @@ import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from email.utils import parseaddr
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 # Every file this script reads or serves lives next to it.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -141,13 +139,6 @@ CLOSED_WINDOW_HOURS = 24
 GONE_WINDOW_HOURS = 24 * 7
 CLOSED_MEMORY_HOURS = GONE_WINDOW_HOURS
 MAX_GONE = 100
-# Mail: the star is the gate — every starred thread shows up, archived ones
-# included, and un-starring is how it leaves. A `group/<name>` label on several
-# threads merges them into one card; see the dashboard help section.
-MAIL_ACCOUNT = os.environ.get("MAIL_ACCOUNT", "you@launchmetrics.com")
-MAIL_QUERY = os.environ.get("MAIL_QUERY", "is:starred -in:trash")
-MAIL_MAX = 50
-MAIL_GROUP_PREFIX = "group/"
 
 JIRA_CLOSED_JQL = ("assignee = currentUser() AND statusCategory = Done "
                    "AND statuscategorychangeddate >= -%dd " % (CLOSED_MEMORY_HOURS // 24) +
@@ -164,8 +155,8 @@ ISSUE_REF = re.compile(r"(?<![\w/])#(\d+)")
 
 # Copied verbatim into cluster children; firstSeenAt/lastChangedAt/lastChange are
 # stamped later by with_changes, straight onto the child dicts.
-# `title` rides along because a child without a ref (mail) has nothing else to
-# render as its link text.
+# `title` rides along for a child's hover text, and for the link text of one that
+# names no ref.
 CHILD_FIELDS = ("chip", "key", "ref", "title", "url", "states", "age", "detail", "facts", "labels", "times")
 
 
@@ -798,78 +789,6 @@ def items_from_jira(rows):
     return items
 
 
-def mail_url(account, thread_id):
-    """The URL gmcli's own `url` command prints, built without a second call."""
-    return f"https://mail.google.com/mail/?authuser={quote(account)}#all/{thread_id}"
-
-
-def _epoch_ms(ms):
-    """Gmail's internalDate is epoch milliseconds."""
-    try:
-        return _iso_utc(datetime.fromtimestamp(int(ms) / 1000, timezone.utc))
-    except (TypeError, ValueError, OSError):
-        return ""
-
-
-def _mail_groups(errors, run):
-    """`group/<name>` user labels -> {label id: label name}. gmcli's labels
-    list prints a table (no --json), so this is the one parsed source; a failure
-    only costs grouping. `run` is the adapter's text call."""
-    try:
-        out = run("gmcli", [MAIL_ACCOUNT, "labels", "list"])
-    except Exception as e:
-        errors.append(_error("mail groups", e))
-        return {}
-    groups = {}
-    for line in out.splitlines()[1:]:
-        parts = line.split("\t")
-        if len(parts) == 3 and parts[2].strip() == "user" \
-                and parts[1].strip().lower().startswith(MAIL_GROUP_PREFIX):
-            groups[parts[0].strip()] = parts[1].strip()
-    return groups
-
-
-def items_from_mail(threads, groups=None):
-    """gmcli search --json -> one card per thread. Threads sharing a
-    `group/<name>` label merge (their name rides along as a fact); a Jira key or
-    GitHub ref in the subject/snippet merges the thread into that card."""
-    items = []
-    for thread in threads or []:
-        messages = sorted(thread.get("messages") or [], key=lambda m: m.get("internalDate") or 0)
-        if not messages:
-            continue
-        first, last = messages[0], messages[-1]
-        thread_id = thread.get("id") or last.get("threadId") or ""
-        label_ids = {lid for m in messages for lid in (m.get("labelIds") or [])}
-        group = next((groups[lid] for lid in sorted(label_ids) if groups and lid in groups), "")
-        text = f'{last.get("subject", "")} {last.get("snippet", "")}'
-        keys = JIRA_KEY.findall(text)
-        facts = []
-        if "UNREAD" in label_ids:
-            facts.append({"label": "unread", "tone": "warn"})
-        if len(messages) > 1:
-            facts.append({"label": f"{len(messages)} messages", "tone": "quiet"})
-        if any(m.get("hasAttachments") for m in messages):
-            facts.append({"label": "attachment", "tone": "quiet"})
-        if group:
-            facts.append({"label": group, "tone": "info"})
-        sender_name, sender_address = parseaddr(last.get("from", ""))
-        items.append(_item(
-            "MAIL", source="mail", key=f"mail/{thread_id}", title=last.get("subject", ""),
-            url=mail_url(MAIL_ACCOUNT, thread_id),
-            author=sender_name or last.get("from", ""),
-            jira=jira_url(keys[-1]) if keys else "",
-            links=([group] if group else []) + _github_links_in(text),
-            # the badge follows who sent last: the mailbox account means the ball
-            # is with them, anyone else (or no sender at all) means it is yours.
-            states=["waiting-reply" if sender_address == MAIL_ACCOUNT else "needs-reply"],
-            detail=html.unescape(last.get("snippet", ""))[:140],
-            facts=facts,
-            times={"updated": _epoch_ms(last.get("internalDate")),
-                   "created": _epoch_ms(first.get("internalDate"))}))
-    return items
-
-
 def _closed_pr_item(node, chip):
     """The same link rule as the open read: a key in the branch, a browse URL in
     the body, or — as a guess — a bare key in the title. A PR must not lose its
@@ -1094,7 +1013,7 @@ def _each(fn, rows):
 
 class AsThem(Cli):
     """The same reads, as someone else. GitHub queries use their login. Jira
-    queries use their account id. Mail stays out: gmcli only has your mailbox."""
+    queries use their account id."""
 
     def __init__(self, login, account_id="", inner=None):
         self.login = login
@@ -1102,13 +1021,11 @@ class AsThem(Cli):
         self.inner = inner or LIVE
 
     def text(self, command, args):
-        if command == "gmcli":
-            raise CliError(command, "skipped — not their mail")
         args = [a.replace("@me", self.login) for a in args]
         # Only the queries asking who *they* are need their account: a read by
         # key is the same ticket for whoever asks. Without an account those
-        # who-am-I reads stay out, the way mail does — one skipped source, not
-        # a warning per ticket the queue happens to link.
+        # who-am-I reads stay out — one skipped source, not a warning per ticket
+        # the queue happens to link.
         if command == "twg" and any("currentUser()" in a for a in args):
             if not self.account_id:
                 raise CliError(command, f"skipped — no Jira account matched {self.login}")
@@ -1194,17 +1111,6 @@ def collect_view(me=None, cli=None):
             errors.append(_error("jira tasks", e))
         return found, 0
 
-    def mail(errors):
-        """Starred threads, with the group/ labels that merge them."""
-        found = []
-        try:
-            threads = cli.json("gmcli", [MAIL_ACCOUNT, "search", MAIL_QUERY,
-                                          "--max", str(MAIL_MAX), "--json"]).get("threads") or []
-            found = items_from_mail(threads, _mail_groups(errors, cli.text))
-        except Exception as e:
-            errors.append(_error("mail", e))
-        return found, 0
-
     def closed_window(errors):
         """Work that finished recently: a live card keeps its closed members."""
         return _collect_closed(cli, me, now, errors), 0
@@ -1218,7 +1124,7 @@ def collect_view(me=None, cli=None):
         found, bots = read(errors)
         return found, bots, errors
 
-    sources = [review_requests, my_prs, assigned_issues, jira_tasks, mail, closed_window]
+    sources = [review_requests, my_prs, assigned_issues, jira_tasks, closed_window]
     reads = _each(source, sources)
     errors, items, hidden = [], [], 0
     for found, bots, block_errors in reads:
@@ -1588,9 +1494,8 @@ def _collect_closed(cli, me, now, errors):
 def _with_jira(items, errors, fetch):
     """Attach the Jira ticket behind each item's link: one query for every key
     the queue names, not one call each. A key that does not resolve is not a
-    link: mail subjects and snippets carry bare KEY-123 tokens, and so do PR
-    titles (UTF-8 / SHA-256 match that shape). Both are guesses, and a guess
-    that misses unlinks without a word."""
+    link: a PR title carries bare KEY-123 tokens (UTF-8 / SHA-256 match that
+    shape), and that is a guess, so a guess that misses unlinks without a word."""
     keys = []
     for item in items:
         url = item.get("jira")
@@ -1615,7 +1520,7 @@ def _with_jira(items, errors, fetch):
         if cache.get(key):
             item["jira_issue"] = cache[key]
         else:
-            if item.get("source") == "mail" or item.get("jira_guess"):
+            if item.get("jira_guess"):
                 item["jira"] = ""
             elif key not in reported:
                 reported.add(key)

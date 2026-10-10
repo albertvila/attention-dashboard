@@ -10,7 +10,7 @@ result. The closed-window searches are the one exception: the producer computes
 their `closed:>=` date from its own clock mid-run, so they key on the search
 they ask for with that date normalized (see key) — every other part of the
 search still has to match. GitHub answers come from fixtures/gh_output.json; the
-twg (Jira) and gmcli (mail) answers are built here, since no live recording is
+twg (Jira) answers are built here, since no live recording is
 committed.
 """
 
@@ -162,21 +162,12 @@ def jira_row(key, summary, status="In Progress", category="In Progress"):
 JIRA_OPEN = [jira_row("RBT-700", "Waiting on a reviewer"),
              jira_row("FIRE-90000", "Not started yet", status="To Do", category="To Do")]
 
-MAIL_THREAD = {"id": "t-seam", "messages": [
-    {"id": "m-seam", "threadId": "t-seam", "labelIds": ["INBOX", "STARRED", "Label_g1"],
-     "subject": "Seam test thread", "snippet": "driven from a recording",
-     "from": "Someone <someone@example.com>", "internalDate": "1780000000000",
-     "hasAttachments": False}]}
 
-MAIL_LABELS = ("ID\tNAME\tTYPE\n"
-               "Label_g1\tgroup/summit\tuser\n"
-               "Label_x\tZoom\tuser\n"
-               "INBOX\tINBOX\tsystem\n")
 
 
 def fixture_recording(drop=()):
     """The recording: the fixture's GitHub answers wired to the exact commands
-    the producer issues, plus the twg/gmcli answers built here.
+    the producer issues, plus the twg answers built here.
 
     `drop` omits commands whose joined text contains an entry, so one run can
     show what a failing source — or one card's checks — does to the rest."""
@@ -225,10 +216,6 @@ def fixture_recording(drop=()):
     calls.append(answer("twg", ["jira", "workitem", "query", "--jql", attention.JIRA_CLOSED_JQL,
                                 "--limit", "100", "--fields", attention.JIRA_CLOSED_FIELDS,
                                 "--output", "json", "--output-summary", "none"], {"data": []}))
-    calls.append(answer("gmcli", [attention.MAIL_ACCOUNT, "search", attention.MAIL_QUERY,
-                                  "--max", str(attention.MAIL_MAX), "--json"],
-                        {"threads": [MAIL_THREAD]}))
-    calls.append(answer("gmcli", [attention.MAIL_ACCOUNT, "labels", "list"], MAIL_LABELS))
     for search in (f"is:pr is:closed author:{ME}", f"is:pr is:closed reviewed-by:{ME}",
                    f"is:issue is:closed assignee:{ME}"):
         calls.append(gh(["api", "graphql", "-f",
@@ -266,18 +253,17 @@ class CollectionFromARecording(unittest.TestCase):
         self.assertEqual(view["hidden_bots"], 3)          # bot filtering stays above the seam
         found = cards(view)
         self.assertEqual({row["chip"] for _, row in found.values()},
-                         {"REVIEW", "MY PR", "ISSUE", "JIRA", "MAIL"})
+                         {"REVIEW", "MY PR", "ISSUE", "JIRA"})
         self.assertEqual(sorted(found), [
             "FIRE-90000", "acme/web-frontend#1933", "acme/web-frontend#2017",
             "acme/web-frontend#2018", "acme/edge-workers#2703",
             "acme/checkout-api#331", "acme/checkout-api#332",
             "acme/checkout-api#334", "acme/checkout-api#335",
-            "RBT-700", "mail/t-seam"])
+            "RBT-700"])
         self.assertEqual(found["acme/checkout-api#335"][0], "needs")
         self.assertEqual(found["acme/checkout-api#334"][0], "ready")
         self.assertEqual(found["RBT-700"][0], "waiting")
         self.assertEqual(found["FIRE-90000"][0], "needs")
-        self.assertEqual(found["mail/t-seam"][0], "needs")
         self.assertEqual(found["acme/web-frontend#1933"][0], "drafts")
         self.assertEqual(view["closed"], [])
 
@@ -306,16 +292,13 @@ class CollectionFromARecording(unittest.TestCase):
         self.assertEqual([c["key"] for c in found["acme/checkout-api#331"][1]["children"]],
                          ["acme/checkout-api#332", "acme/checkout-api#335"])
 
-    def test_jira_enrichment_and_mail_grouping_cross_the_seam(self):
+    def test_jira_enrichment_crosses_the_seam(self):
         found = cards(self.collect())
-        # each card's jira_issue came from a recorded `twg jira workitem get` key.
+        # each card's jira_issue came from the one recorded `twg jira workitem query`.
         self.assertEqual(found["acme/checkout-api#334"][1]["jira_issue"]["summary"],
                          "FIRE-9001 ticket")
         self.assertEqual(found["acme/web-frontend#2018"][1]["jira_issue"]["summary"],
                          "BIT-9001 ticket")
-        # the mail card's group fact came from the recorded gmcli labels table.
-        self.assertEqual(found["mail/t-seam"][1]["facts"], [{"label": "group/summit", "tone": "info"}])
-        self.assertEqual(found["mail/t-seam"][1]["author"], "Someone")
 
     def test_one_broken_source_leaves_the_others_collecting(self):
         view = self.collect(drop=("twg jira workitem query --jql " + attention.JIRA_JQL,))
@@ -362,7 +345,7 @@ class TheSeam(unittest.TestCase):
         self.assertEqual(cli.json("gh", ["api", "user"]), {"login": ME})
         for call in (lambda: cli.json("gh", ["search", "prs", "--author=@me"]),
                      lambda: cli.graphql("{ viewer { login } }"),
-                     lambda: cli.text("gmcli", [attention.MAIL_ACCOUNT, "labels", "list"])):
+                     lambda: cli.text("twg", ["jira", "workitem", "get", "RBT-1", "--output", "json"])):
             with self.subTest(call=call):
                 self.assertRaises(LookupError, call)
 
