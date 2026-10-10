@@ -1134,7 +1134,7 @@ class OpenSessions(unittest.TestCase):
                 raise attention.CliError(command, "no such thread")
         out = attention.focus({"kind": "bb", "target": "thr_x"}, cli=Stubborn())
         self.assertFalse(out["ok"])
-        self.assertEqual(out["ran"], "bb thread open thr_x && open -a bb")
+        self.assertEqual(out["ran"], "bb thread open thr_x")   # the raise never ran
         self.assertEqual(out["error"], "no such thread")
 
     def test_specs_are_the_unassigned_issues_i_wrote_with_that_label(self):
@@ -1222,17 +1222,32 @@ class OpenSessions(unittest.TestCase):
 
     def test_focus_runs_only_the_commands_a_session_needs_and_only_for_an_id(self):
         cli = self.Fake()
+        # both kinds focus the session and then raise the app: `herdr tab focus`
+        # moves Herdr's own focus without bringing the window forward, so a reader
+        # in a system browser would otherwise see nothing happen
         self.assertEqual(attention.focus({"kind": "herdr", "target": "wN:t1"}, cli=cli),
-                         {"ok": True, "ran": "herdr tab focus wN:t1"})
-        self.assertEqual(cli.calls[-1], ["herdr", "tab", "focus", "wN:t1"])
-        # bb delivers into the app without raising it, so the jump raises it too
+                         {"ok": True, "ran": "herdr tab focus wN:t1 && open -a Herdr", "raised": True})
+        self.assertEqual(cli.calls[-2:], [["herdr", "tab", "focus", "wN:t1"], ["open", "-a", "Herdr"]])
         self.assertEqual(attention.focus({"kind": "bb", "target": "thr_sa8ywf5fsx"}, cli=cli),
-                         {"ok": True, "ran": "bb thread open thr_sa8ywf5fsx && open -a bb"})
+                         {"ok": True, "ran": "bb thread open thr_sa8ywf5fsx && open -a bb", "raised": True})
         self.assertEqual(cli.calls[-2:], [["bb", "thread", "open", "thr_sa8ywf5fsx"], ["open", "-a", "bb"]])
         for bad in ({"kind": "herdr", "target": "wN:t1; whoami"}, {"kind": "herdr", "target": ""},
                     {"kind": "shell", "target": "wN:t1"}, {}):
             self.assertFalse(attention.focus(bad, cli=cli)["ok"], bad)
-        self.assertEqual(len(cli.calls), 3)          # nothing else ever reached the CLI
+        self.assertEqual(len(cli.calls), 4)          # nothing else ever reached the CLI
+
+    def test_a_window_that_will_not_come_forward_is_not_a_failed_jump(self):
+        """The jump is the focus; raising the window is a nicety, and `open` is not
+        everywhere. A raise that fails still leaves the session focused, and says so."""
+        class NoWindow(self.Fake):
+            def text(self, command, args):
+                if command == "open":
+                    raise attention.CliError(command, "open: command not found")
+                self.calls.append([command] + list(args))
+        out = attention.focus({"kind": "herdr", "target": "wN:t1"}, cli=NoWindow())
+        self.assertTrue(out["ok"])
+        self.assertFalse(out["raised"])
+        self.assertEqual(out["ran"], "herdr tab focus wN:t1 && open -a Herdr")
 
 
 class Snoozes(unittest.TestCase):

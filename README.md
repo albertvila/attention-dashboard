@@ -272,9 +272,10 @@ someone needs now. One that the queue is showing anyway reads `already on the
 board`, because a spec you are looking at is not a suggestion.
 
 `POST /focus` is the one write that moves a window instead of a file: it runs
-`herdr tab focus <tab>` — which raises Herdr itself — or `bb thread open <thread>`
-followed by `open -a bb`, because bb's own CLI delivers the thread into the app
-without bringing its window forward. Only for a target matching
+`herdr tab focus <tab>` or `bb thread open <thread>`, each followed by
+`open -a <app>` — both CLIs move their own focus without bringing the window
+forward, so a reader looking at the board in a system browser would see nothing
+happen. Only for a target matching
 `[A-Za-z0-9:_-]{1,64}`, and it is a POST so that loading a page can never move the
 reader's terminal.
 
@@ -428,7 +429,8 @@ from `attention-view.js`.
 - **Ongoing work** is a right rail: one box per repository with an agent session
   open on it — green while an agent is working, amber when blocked, grey when the
   pane is merely open — one row per session, and each row opens that session
-  (`herdr` focuses the pane's tab, `bb` opens the thread). Sessions are read from
+  (`herdr` focuses the pane's tab, `bb` opens the thread) and raises the app that
+  holds it. Sessions are read from
   `/sessions` at every look, so the rail is machine state, never a snapshot, and
   the repository name on the card is the whole join.
 - **Specs** are a left rail: the open issues I wrote with the `spec` label that

@@ -1511,30 +1511,37 @@ def spec_issues(cli=None, config=None):
 
 def focus(request, cli=None):
     """Jump to the session a card's link named — the user's own terminal, on the
-    user's own machine. Three commands are reachable and only for an id that looks
-    like one, because this moves the window the reader is looking at: it is a
-    POST, never something a page can trigger by being loaded."""
+    user's own machine. Only an id that looks like one is reachable, because this
+    moves the window the reader is looking at: it is a POST, never something a page
+    can trigger by being loaded."""
     cli = cli or LIVE
     request = request or {}
     target, kind = request.get("target"), request.get("kind")
     if not isinstance(target, str) or not FOCUS_TARGET.match(target):
         return {"ok": False, "error": "bad target"}
     if kind == "herdr":
-        # `tab focus` switches Herdr's own window to the pane: it raises itself.
-        commands = [("herdr", ["tab", "focus", target])]
+        # `tab focus` moves Herdr's own focus to that tab but does not bring the
+        # app forward: a reader in a system browser would see nothing happen.
+        jump, app = ("herdr", ["tab", "focus", target]), "Herdr"
     elif kind == "bb":
-        # bb delivers the thread into the app but leaves its window where it was,
-        # so the jump raises it too — otherwise nothing appears to happen.
-        commands = [("bb", ["thread", "open", target]), ("open", ["-a", "bb"])]
+        # bb delivers the thread into the app and likewise leaves its window.
+        jump, app = ("bb", ["thread", "open", target]), "bb"
     else:
         return {"ok": False, "error": "unknown kind"}
-    ran = [c + " " + " ".join(a) for c, a in commands]
+    ran = [jump[0] + " " + " ".join(jump[1])]
     try:
-        for command, args in commands:
-            cli.text(command, args)
+        cli.text(*jump)
     except Exception as e:
         return {"ok": False, "ran": " && ".join(ran), "error": str(e)[:200]}
-    return {"ok": True, "ran": " && ".join(ran)}
+    # Raising the window is best effort: the jump already happened, and `open` is
+    # not on every platform. The answer still says whether it came forward.
+    ran.append("open -a " + app)
+    try:
+        cli.text("open", ["-a", app])
+        raised = True
+    except Exception:
+        raised = False
+    return {"ok": True, "ran": " && ".join(ran), "raised": raised}
 
 
 def _park(key, value, path, data):
