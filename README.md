@@ -163,10 +163,13 @@ tier          needs | ready | waiting — the row's own tier, from its own state
 section       needs | ready | waiting | drafts | closed — where the row is rendered
 children      linked items folded into this card (issue <-> PR <-> Jira)
 change        {kind: new|moved, label, from_*/to_*} — THIS generation only
-comment_count how many comments the source's read carried (Jira: `comment.total`); a
-              reply landing is a move — label `a reply landed` — which is the change
-              an acknowledged card wakes on. Absent on rows whose source collects no
-              comments, and those rows never move on one
+comment_count how many comments the source's read carried for that ticket (Jira:
+              `comment.total`), or for the ticket a GitHub card names. The reply rule
+              compares a card's tickets together — its own plus every member riding
+              with it — so a reply on the alert under a card is a reply on the card. A
+              reply landing is a move — label `a reply landed` — which is the change an
+              acknowledged card wakes on. Absent on rows whose source collects no
+              comments, and those never move on one
 firstSeenAt   when the row first appeared; durable across generations
 lastChangedAt when it last moved tier/state/section; durable
 lastChange    that move, kept so a surface can label it later
@@ -269,9 +272,11 @@ The **Team** box at the top of that rail is the roster of the teams in
 `stalkTeams` — the one way into somebody else's queue. **You** is the first row
 and wears your own avatar; under it the roster comes grouped by team, each group
 named by its slug, because a roster is membership: somebody on two teams stands
-under each, and the reader is never in the groups, so the read leaves you out. The
-box is opt-in (`stalker: true`), and with it off the box is not there at all
-rather than there and empty.
+under each, and the reader is never in the groups — neither are the machine
+accounts the org's teams carry (`bit-github-lm`, `lm-sec-github`), which wear no
+`[bot]` suffix for GitHub to flag, so the read names them itself. The box is
+opt-in (`stalker: true`), and with it off the box is not there at all rather than
+there and empty.
 
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and
@@ -483,3 +488,12 @@ node test_dashboard_sweep.mjs            # the visible-tab sweep — and what a 
 Nothing here touches the network or a live CLI: the seam tests drive a recorded
 adapter in place of `gh` and `twg`. (`node` for the two `.mjs` suites,
 `python3` for the unittest modules.)
+
+The recording in `fixtures/gh_output.json` is **invented on purpose** — real
+org, repo, branch and login names were taken out of this repo's history, and the
+shapes are what a recording looked like. That proves the parser and not the wire,
+so it is worth re-capturing when a GraphQL selection changes: run the seam
+commands against the live CLI (`gh api graphql -f query=…` for each selection the
+producer sends), replace every identifier with an invented one, keep the shapes
+exactly as they arrived, and commit that. A field that disappears upstream then
+shows up as a diff here instead of as quietly missing data.

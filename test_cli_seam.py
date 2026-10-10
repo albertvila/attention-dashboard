@@ -16,6 +16,7 @@ committed.
 
 import json
 import re
+import subprocess
 import threading
 import unittest
 from unittest import mock
@@ -210,7 +211,7 @@ def fixture_recording(drop=()):
     jira_keys = ["BIT-9001", "BIT-9002", "FIRE-9001", "RBT-9001"]
     calls.append(answer("twg", ["jira", "workitem", "query",
                                 "--jql", "key in (%s)" % ", ".join(jira_keys),
-                                "--limit", "100", "--fields", attention.JIRA_FIELDS,
+                                "--limit", "100", "--fields", attention.JIRA_OPEN_FIELDS,
                                 "--output", "json", "--output-summary", "none"],
                         {"data": [jira_row(k, f"{k} ticket") for k in jira_keys if k != "BIT-9002"]}))
     calls.append(answer("twg", ["jira", "workitem", "query", "--jql", attention.JIRA_JQL,
@@ -350,6 +351,22 @@ class TheSeam(unittest.TestCase):
                      lambda: cli.text("twg", ["jira", "workitem", "get", "RBT-1", "--output", "json"])):
             with self.subTest(call=call):
                 self.assertRaises(LookupError, call)
+
+    def test_a_tool_that_never_answers_is_an_error_not_a_held_slot(self):
+        """A hung call keeps its slot for good: sixteen of those and every later
+        read waits on the semaphore, which reads as a board that loads nothing and
+        says nothing. A read this slow is a failed read, reported like any other."""
+        seen = {}
+
+        def never(*args, **kwargs):
+            seen.update(kwargs)
+            raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout") or 0)
+
+        with mock.patch.object(attention.subprocess, "run", never):
+            with self.assertRaises(attention.CliError) as caught:
+                attention.Cli().text("gh", ["api", "user"])
+        self.assertEqual(seen.get("timeout"), attention.CLI_TIMEOUT)   # the ceiling is asked for
+        self.assertIn("timed out", caught.exception.output)
 
     def test_a_recorded_failure_raises_the_cli_error_contract(self):
         args = ["pr", "checks", "1", "--repo", "o/r", "--json", "name,state"]

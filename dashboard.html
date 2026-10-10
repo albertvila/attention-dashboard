@@ -572,7 +572,10 @@ async function paintComments(){
   // and reading its thread is a call for a line nobody shows.
   const live = view.tiers.flatMap(t => t.rows)
     .filter(r => r.key && !(r.change && r.change.kind === 'gone'));
-  const keys = [...new Set(live.map(r => r.key).filter(k => JIRA_KEY.test(k)))];
+  // the card's own ticket and every ticket riding with it: a reply on a member is
+  // a reply on the card, so its thread is read too.
+  const keys = [...new Set(live.flatMap(r => [r.key].concat((r.children || []).map(c => c.key)))
+    .filter(k => JIRA_KEY.test(k)))];
   if(!keys.length) return;
   try{
     comments = await (await fetch('/comments?keys=' + keys.join(','))).json();

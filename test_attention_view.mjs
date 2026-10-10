@@ -421,6 +421,22 @@ assert.equal(readView({ comment: { 'FIRE-1': LANDED.comment } }, '2026-10-02T12:
 // read and empty is not the same as not read: one leaves the card waiting, the other does not
 assert.equal(readView({ comment: { 'FIRE-1': [] } }, NOW).nextOf(row()).wanting.some(w => w.needs === 'comment'), false);
 assert.equal(overlay(data(), {}).nextOf(row()).wanting.some(w => w.needs === 'comment'), true);
+// a card's evidence is its members' too: a reply on the alert riding under it is
+// a reply on the card, and the member's key is what was read
+const withKid = row({ key: 'RBT-9', children: [kid({ key: 'FIRE-71', ref: 'FIRE-71' })] });
+const kidView = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                        { key: 'ready', title: 'r', items: [] },
+                                        { key: 'waiting', title: 'w', items: [withKid] }] }),
+                         { reads: { comment: { 'FIRE-71': LANDED.comment } },
+                           seenAt: '2026-10-02T11:00:00.000Z' });
+assert.match(kidView.nextOf(withKid).next.say, /^answer Ada — they wrote after your last look/);
+// and a member that was read and had nothing leaves the card waiting on nothing
+const quietKid = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                         { key: 'ready', title: 'r', items: [] },
+                                         { key: 'waiting', title: 'w', items: [withKid] }] }),
+                          { reads: { comment: { 'FIRE-71': [] } }, seenAt: '2026-10-02T11:00:00.000Z' });
+assert.equal(quietKid.nextOf(withKid).wanting.some(w => w.needs === 'comment'), false);
+
 // and it outranks a wait: the card still links to another team's ticket, and the
 // message that landed since your last look is the thing you can act on
 assert.match(readView({ comment: { 'FIRE-1': LANDED.comment } }, '2026-10-02T11:00:00.000Z')

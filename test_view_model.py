@@ -381,6 +381,83 @@ class JiraSource(unittest.TestCase):
         self.assertEqual([c["ref"] for c in card["children"]], ["FIRE-97142"])
         self.assertEqual(card["linked"], [])
 
+    def test_a_block_link_counts_however_the_instance_words_it(self):
+        """Instances write `is blocked by` or `Blocked by`, so the test is on the
+        word, in one place. Tighten it back to the exact phrase and a link stops
+        blocking — it just vanishes."""
+        rows = [{"key": "FIRE-1", "summary": "held",
+                 "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
+                 "issueType": {},
+                 "issuelinks": [
+                     {"type": {"name": "Blocking Issue", "inward": "Blocked by", "outward": "blocks"},
+                      "inwardIssue": {"key": "FIDI-9", "fields": {
+                          "summary": "the holder", "issuetype": {"name": "Bug"},
+                          "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}}}}}]}]
+        item = attention.items_from_jira(rows)[0]
+        self.assertEqual([b["key"] for b in item["blocked_by"]], ["FIDI-9"])
+        self.assertEqual(item["links"], [])
+        self.assertEqual(item["linked"], [])
+
+    def test_a_reply_on_a_member_is_a_reply_on_the_card(self):
+        """A card's count is its tickets together: the alert riding under an incident
+        is part of it, so a reply there moves the card and wakes its ack."""
+        def alert(replies):
+            return {"key": "FIRE-71", "summary": "the alert",
+                    "status": {"name": "To Do", "statusCategory": {"name": "To Do"}}, "issueType": {},
+                    "comment": {"total": replies}}
+
+        def work(replies):
+            return {"key": "RBT-9", "summary": "the work",
+                    "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
+                    "issueType": {}, "comment": {"total": replies},
+                    "issuelinks": [{"type": {"name": "Problem/Incident", "inward": "is caused by",
+                                             "outward": "causes"},
+                                    "outwardIssue": {"key": "FIRE-71", "fields": {}}}]}
+
+        def generation(work_replies, alert_replies, previous):
+            items = attention.items_from_jira([work(work_replies), alert(alert_replies)])
+            return attention.payload(attention.build_view(items, now=NOW), previous=previous, now=NOW)
+
+        def the_card(payload):
+            return next(r for t in payload["tiers"] for r in t["items"] if r["ref"] == "RBT-9")
+
+        first = generation(0, 3, None)                       # the baseline carries both counts
+        self.assertEqual((the_card(first)["comment_count"],
+                          [c["comment_count"] for c in the_card(first)["children"]]), (0, [3]))
+        second = generation(0, 3, first)                     # nothing landed
+        self.assertEqual(second["changes"]["summary"]["moved"], 0)
+        third = generation(0, 4, second)                     # the reply is on the child
+        # the card moves (and carries its member's count), and the member's own row is
+        # marked too, so the sentence counts both — which is where the reply landed
+        self.assertEqual(third["changes"]["items"]["RBT-9"]["label"], "a reply landed")
+        self.assertEqual(third["changes"]["items"]["FIRE-71"]["label"], "a reply landed")
+        # the row keeps its own ticket's count; the rule is what adds the members up
+        self.assertEqual(the_card(third)["comment_count"], 0)
+        self.assertEqual([c["comment_count"] for c in the_card(third)["children"]], [4])
+
+    def test_a_members_copy_of_the_same_count_is_not_added_twice(self):
+        """A PR member naming the card's ticket carries that ticket's count as well;
+        counting it again would inflate the number the reply rule compares."""
+        card = {"ref": "RBT-9", "chip": "JIRA", "comment_count": 3,
+                "children": [{"ref": "o/r#1", "chip": "MY PR", "comment_count": 3},
+                             {"ref": "FIRE-71", "chip": "JIRA", "comment_count": 4}]}
+        self.assertEqual(attention._comment_total(card), 7)          # 3, plus the alert's 4
+        # a card that is only a PR counts the ticket it names
+        self.assertEqual(attention._comment_total(
+            {"ref": "o/r#1", "chip": "MY PR", "comment_count": 5}), 5)
+
+    def test_a_linked_tickets_count_rides_the_card_that_names_it(self):
+        """A reply on the ticket behind a PR is a reply on that card. The count goes
+        onto the item, not into the display shape the card renders."""
+        items = [{"jira": "https://x/browse/RBT-9", "ref": "o/r#1", "title": "a PR"}]
+        attention._with_jira(items, [], lambda keys: {"RBT-9": {
+            "summary": "s", "status": "In Progress", "status_category": "In Progress",
+            "type": "Task", "comment_count": 4}})
+        self.assertEqual(items[0]["comment_count"], 4)
+        self.assertEqual(items[0]["jira_issue"],
+                         {"summary": "s", "status": "In Progress", "status_category": "In Progress",
+                          "type": "Task"})
+
     def test_a_blocking_link_is_a_dependency_not_a_cluster_link(self):
         """A blocker stays its own card — it rides in blocked_by — so a blocking
         link never clusters the two tickets, in either direction."""
@@ -1236,7 +1313,8 @@ class OpenSessions(unittest.TestCase):
 
             def json(self, command, args):
                 if "squad-platform" in args[1]:
-                    return [{"login": "you"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
+                    return [{"login": "you"}, {"login": "teammate-one"},
+                            {"login": "lm-sec-github"}, {"login": "lm-qinfei"}]
                 if "team-payments" in args[1]:
                     return [{"login": "teammate-one"}, {"login": "teammate-two"}]
                 raise AssertionError("a name read must be batched, not per member")
@@ -1248,11 +1326,14 @@ class OpenSessions(unittest.TestCase):
             out = attention.team_members(config={"stalkTeams": ["squad-platform", "team-payments"],
                                                 "stalker": True}, me="you")
         self.assertEqual(out["you"], {"login": "you"})
-        self.assertEqual([p["login"] for p in out["people"]], ["teammate-one", "teammate-two"])
-        self.assertEqual(out["people"][0]["name"], "Ada Lovelace")            # bots and me left out
+        # a machine account and me left out; a named login doing the work stays
+        self.assertEqual([p["login"] for p in out["people"]],
+                         ["teammate-one", "lm-qinfei", "teammate-two"])
+        self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
         # the faces the box groups by: one team, or both when the read listed them twice
         self.assertEqual(out["people"][0]["teams"], ["squad-platform", "team-payments"])
-        self.assertEqual(out["people"][1]["teams"], ["team-payments"])
+        self.assertEqual(out["people"][1]["teams"], ["squad-platform"])
+        self.assertEqual(out["people"][2]["teams"], ["team-payments"])
 
     def test_the_stalker_switch_closes_the_teammate_queue(self):
         """`stalker: false` is the whole feature off: no faces to click and no
@@ -1376,6 +1457,45 @@ class Snoozes(unittest.TestCase):
         attention.write_snooze("o/r#1", until, path=self.path, now=NOW)
         attention.write_snooze("o/r#2", until, path=self.path, now=NOW)
         self.assertEqual(attention.write_snooze("o/r#1", "", path=self.path, now=NOW), {"o/r#2": until})
+
+    def test_a_stamp_written_by_hand_expires_when_it_says_it_does(self):
+        """`+02:00` sorts after a UTC stamp as text, so a local offset used to live
+        forever — an hour past its moment and still hiding a card."""
+        plus_two = timezone(timedelta(hours=2))
+        past = (NOW - timedelta(hours=1)).astimezone(plus_two).isoformat()
+        future = (NOW + timedelta(hours=1)).astimezone(plus_two).isoformat()
+        with open(self.path, "w") as fh:
+            json.dump({"past": past, "future": future, "junk": "not a time", "number": 5}, fh)
+        self.assertEqual(attention.load_snoozes(self.path, now=NOW), {"future": future})
+
+    def test_two_parking_writes_at_once_both_land(self):
+        """What the lock is for: without it each writer writes back the file it read
+        before the other's key was in it, so one parking silently disappears. This
+        cannot be made to fail without the lock, so it documents the rule rather
+        than guarding it."""
+        until = attention._iso_utc(NOW + timedelta(hours=1))
+        keys = ["o/r#%d" % i for i in range(8)]
+        threads = [threading.Thread(target=attention.write_snooze, args=(k, until, self.path, NOW))
+                   for k in keys]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(attention.load_snoozes(self.path, now=NOW)), sorted(keys))
+
+    def test_a_request_cannot_choose_when_it_was_acknowledged(self):
+        """A time from the body parks the card until then, and no change can release
+        it: `lastChangedAt` never passes a future ack."""
+        path = attention.ack_path
+        attention.ack_path = lambda: os.path.join(self.dir, "acks.json")
+        try:
+            data = attention.ack({"key": "o/r#1", "at": "2030-01-01T00:00:00Z"})
+            self.assertEqual(sorted(data), ["o/r#1"])
+            self.assertTrue(data["o/r#1"].startswith("20"), data["o/r#1"])
+            self.assertNotIn("2030", data["o/r#1"])
+            self.assertEqual(attention.ack({"key": "o/r#1", "clear": True}), {})
+        finally:
+            attention.ack_path = path
 
     def test_missing_or_broken_file_is_just_empty(self):
         self.assertEqual(attention.load_snoozes(self.path), {})

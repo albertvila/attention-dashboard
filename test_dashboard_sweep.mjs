@@ -27,7 +27,7 @@ const snapshot = (at, tiers = []) => ({
 /* The page is a document, so every element it asks for is a stub that answers
    with another stub; the two things under test are the ones it is not. */
 function mount(opts = {}) {
-  const collected = [], stamped = [], elements = {}, created = [], titles = [];
+  const collected = [], stamped = [], elements = {}, created = [], titles = [], urls = [];
   const stub = () => new Proxy(
     { classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, style: {}, dataset: {},
       appendChild: stub, addEventListener(){}, remove(){}, focus(){} },
@@ -53,6 +53,7 @@ function mount(opts = {}) {
     // a look is a collection and a record: which one it moved is the whole test
     fetch: async url => {
       collected.push(now);
+      urls.push(String(url));
       // a rail that never answers is a rail that must not hold the board
       if (opts.railsSilent && (String(url).startsWith('/specs') || String(url).startsWith('/sessions'))) {
         return new Promise(() => {});
@@ -81,7 +82,7 @@ function mount(opts = {}) {
   vm.runInContext(readFileSync(join(here, 'attention-view.js'), 'utf8'), context);
   vm.runInContext(page, context);
   return {
-    collected, stamped, created, titles, intervalMs: () => interval && interval.ms,
+    collected, stamped, created, titles, urls, intervalMs: () => interval && interval.ms,
     element: id => elements[id],
     textsOf: cls => created.filter(c => c.cls === cls).map(c => c.text),
     hide: () => { state = 'hidden'; },
@@ -173,7 +174,11 @@ assert.equal(L.created.filter(c => String(c.cls) === 'badge wip' && c.text === '
 const saidCard = {
   chip: 'JIRA', key: 'RBT-9', ref: 'RBT-9', title: 'a ticket with a thread', url: 'u', container: '',
   states: [{ key: 'in-progress', label: 'in progress', tier: 'waiting', tone: 'info' }],
-  facts: [], labels: [], children: [], section: 'needs', tier: 'waiting', times: {},
+  facts: [], labels: [], section: 'needs', tier: 'waiting', times: {},
+  // the alert riding with it: its thread is the card's thread, so it is read too
+  children: [{ chip: 'JIRA', key: 'FIRE-71', ref: 'FIRE-71', title: 'the alert', url: 'u2',
+               states: [{ key: 'in-progress', label: 'in progress', tier: 'waiting', tone: 'info' }],
+               facts: [], labels: [], times: {} }],
 };
 const saidThread = { 'RBT-9': [
   { at: '2026-10-07T12:30:00.000Z', who: 'Ada', text: 'can you re-run this?', mine: false }] };
@@ -190,6 +195,9 @@ assert.ok(!fresh.textsOf('do').includes('answer Ada'), 'a first look flags nothi
 const C = mount({ railsSilent: true, seen: '2026-10-07T12:00:00.000Z', comments: saidThread, tiers: saidTiers });
 await tick(); await tick();
 assert.ok(C.textsOf('do').includes('answer Ada'), 'the thread lands on the card as the line');
+const asked = C.urls.filter(u => u.startsWith('/comments')).join(' ');
+assert.ok(asked.includes('RBT-9') && asked.includes('FIRE-71'),
+  'the card and the ticket riding with it are both read: ' + asked);
 
 /* The Team box is a roster, not one flat list: one group per team, named by its
    slug, and somebody on two teams stands under each — while the reader is the row

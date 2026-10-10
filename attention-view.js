@@ -245,16 +245,19 @@
     const seenAt = opts.seenAt || null;
     const snoozes = opts.snoozes || {};
     const acks = opts.acks || {};
-    /* What a per-card read landed, if a surface has read it:
-       {kind: {key: [evidence]}} — the same kinds the rules declare. It arrives
-       after the board has painted, so a surface rebuilds the view with it. A card
-       with no entry was not read, which is a different thing from read and empty:
-       the first leaves the card waiting on that kind, the second does not. */
+    /* Every kind of evidence a per-card read landed: {kind: {key: [evidence]}}.
+       It arrives after the board has painted, so a surface rebuilds the view with
+       it. A card's evidence is its own *and its members'* — a reply on the alert
+       riding under a card is a reply on the card — and a kind counts as read only
+       when one of those keys came back, so read-and-empty stays different from
+       not read. */
     const reads = opts.reads || {};
     const readsFor = row => {
+      const keys = [row.key].concat((row.children || []).map(c => c.key));
       const out = {};
       for (const kind of Object.keys(reads)) {
-        if (Object.prototype.hasOwnProperty.call(reads[kind], row.key)) out[kind] = reads[kind][row.key];
+        const read = keys.filter(k => Object.prototype.hasOwnProperty.call(reads[kind], k));
+        if (read.length) out[kind] = [].concat(...read.map(k => reads[kind][k]));
       }
       return Object.keys(out).length ? out : null;
     };

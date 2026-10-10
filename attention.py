@@ -86,7 +86,7 @@ def _state(key):
 SCHEMA_VERSION = 1
 # Bumped by hand for human-meaningful changes; the code hash below is the
 # automatic "which build wrote this file" witness a stale process is caught by.
-PRODUCER_VERSION = 5
+PRODUCER_VERSION = 6
 _PRODUCER_CODE = None
 
 
@@ -169,7 +169,8 @@ ISSUE_REF = re.compile(r"(?<![\w/])#(\d+)")
 # stamped later by with_changes, straight onto the child dicts.
 # `title` rides along for a child's hover text, and for the link text of one that
 # names no ref.
-CHILD_FIELDS = ("chip", "key", "ref", "title", "url", "states", "age", "detail", "facts", "labels", "times")
+CHILD_FIELDS = ("chip", "key", "ref", "title", "url", "states", "age", "detail", "facts", "labels",
+                "times", "comment_count")
 
 
 def _closed_updated(group):
@@ -213,7 +214,7 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
         # names inline — is not a line of its own: the key would render twice.
         carried = {r["ref"] for r in rows} | {jira_key}
         rows[0]["linked"] = [l for l in rows[0].get("linked") or [] if l["key"] not in carried]
-        rows[0]["children"] = [{k: r[k] for k in CHILD_FIELDS} for r in kids]
+        rows[0]["children"] = [{k: v for k, v in r.items() if k in CHILD_FIELDS} for r in kids]
         if all(id(item) in closed_ids for item in group):
             # The lane shows the last day, however long closed work is collected
             # for: a finished cluster older than that drops out, and a surface
@@ -407,6 +408,25 @@ def _row_tier(row):
     return WAITING
 
 
+def _comment_total(row):
+    """How many comments the card's tickets carry: every Jira ticket it holds,
+    counted once each, so a reply on the alert riding under a card moves the card.
+
+    A GitHub row's count is the count of the ticket it names. When that ticket is
+    the card's own header, the members naming it carry the same number, and adding
+    those up would inflate what the rule compares — so only the card's own row and
+    the Jira tickets under it are counted."""
+    tickets, seen = [], set()
+    for held in [row] + list(row.get("children") or []):
+        key, count = held.get("ref"), held.get("comment_count")
+        if not key or count is None or key in seen:
+            continue
+        if held.get("chip") == "JIRA" or held is row:
+            seen.add(key)
+            tickets.append(count)
+    return sum(tickets) if tickets else None
+
+
 def _replied(was_row, row):
     """How the card's comment count moved since the previous snapshot: +1 when a
     reply landed, -1 when one went, 0 when nothing about it changed.
@@ -416,7 +436,7 @@ def _replied(was_row, row):
     witness only when the row it is compared against carried a count as well:
     the first snapshot after this rule sets the baseline, instead of calling
     every ticket somebody has ever commented on newly changed."""
-    before, after = was_row.get("comment_count"), row.get("comment_count")
+    before, after = _comment_total(was_row), _comment_total(row)
     if before is None or after is None or before == after:
         return 0
     return 1 if after > before else -1
@@ -1018,7 +1038,10 @@ class CliError(RuntimeError):
         super().__init__(output)
 
 
-STALK_BOTS = {"bit-github-lm", "lm-sec-github", "lm-qinfei", "maxlaunchmetrics"}
+# Machine accounts the org's teams carry: a login like any other, wearing no
+# `[bot]` suffix for the test every other read uses, so the roster names them
+# itself. Everyone else on a team is a face you can click.
+STALK_BOTS = {"bit-github-lm", "lm-sec-github"}
 STALK_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 STALK_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
@@ -1030,7 +1053,12 @@ class Cli:
 
     def text(self, command, args):
         with CLI_SLOTS:
-            proc = subprocess.run([command] + args, capture_output=True, text=True)
+            try:
+                proc = subprocess.run([command] + args, capture_output=True, text=True,
+                                      timeout=CLI_TIMEOUT)
+            except subprocess.TimeoutExpired as e:
+                raise CliError(command + " " + " ".join(args),
+                               f"timed out after {CLI_TIMEOUT}s") from e
         if proc.returncode != 0:
             raise CliError(command + " " + " ".join(args), (proc.stderr or proc.stdout).strip())
         return proc.stdout
@@ -1050,6 +1078,10 @@ LIVE = Cli()
 # each, and `map` walks the rows in order whatever order the answers land in, so
 # the view never depends on who answers first.
 CLI_IN_FLIGHT = 16
+# A tool that never answers would hold its slot for good: sixteen of those and
+# every later read waits on the semaphore, which reads as a board that loads
+# nothing and says nothing. A read this slow is a failed read.
+CLI_TIMEOUT = 60
 # One budget for every read in the process, not one per pool: the pools nest (a
 # source runs its per-card reads inside the pool of sources, the page asks for
 # its rails while a refresh is still going, and a teammate's queue is a whole
@@ -1299,16 +1331,30 @@ BB_ENV = re.compile(r"\.bb/plugins/[^/]+/host-data/(?:worktrees|workspaces)/(thr
 FOCUS_TARGET = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
 
 
+_SLUGS = {}      # checkout path -> container slug, for the life of the process
+
+
+def _warm_slugs(paths, cli):
+    """Every checkout this look needs, read at once. Each slug is one `git` call,
+    and one after another they are the rail's whole latency."""
+    _each(lambda path: _slug_for(path, cli),
+          [p for p in dict.fromkeys(paths) if p and p not in _SLUGS])
+
+
 def _slug_for(path, cli):
     """A checkout -> the container slug the snapshot uses, read from its own
     remote so the join needs no name guessing; the directory name is the
-    fallback for a checkout with no origin."""
+    fallback for a checkout with no origin. Remembered: a checkout's remote does
+    not change while the server runs, and a look would ask again every time."""
+    if path in _SLUGS:
+        return _SLUGS[path]
     try:
         url = cli.text("git", ["-C", path, "remote", "get-url", "origin"]).strip()
     except CliError:
         url = ""
     slug = url.split("github.com", 1)[-1].lstrip(":/").removesuffix(".git") if url else ""
-    return slug if "/" in slug else os.path.basename(path.rstrip("/"))
+    _SLUGS[path] = slug if "/" in slug else os.path.basename(path.rstrip("/"))
+    return _SLUGS[path]
 
 
 def live_sessions(cli=None):
@@ -1326,7 +1372,9 @@ def live_sessions(cli=None):
                  "origin": origin, "pane": pane, "herdr": herdr, "bb": bb})
 
     try:
-        for pane in cli.json("herdr", ["pane", "list"])["result"]["panes"]:
+        panes = cli.json("herdr", ["pane", "list"])["result"]["panes"]
+        _warm_slugs([p.get("foreground_cwd") or p.get("cwd") or "" for p in panes], cli)
+        for pane in panes:
             path = pane.get("foreground_cwd") or pane.get("cwd") or ""
             thread = BB_ENV.search(path)
             if not pane.get("agent") and not thread:
@@ -1346,11 +1394,12 @@ def live_sessions(cli=None):
 
     try:
         projects = {p["id"]: p for p in cli.json("bb", ["project", "list", "--json"])}
-        for thread in cli.json("bb", ["thread", "list", "--json"]):
-            if thread.get("status") != "active":
-                continue                      # hundreds of threads; idle is finished
-            project = projects.get(thread.get("projectId")) or {}
-            path = (project.get("sources") or [{}])[0].get("path", "")
+        # hundreds of threads; idle is finished. The paths are read at once, so a
+        # look is one batch of `git` calls rather than one after another.
+        active = [(t, ((projects.get(t.get("projectId")) or {}).get("sources") or [{}])[0].get("path") or "")
+                  for t in cli.json("bb", ["thread", "list", "--json"]) if t.get("status") == "active"]
+        _warm_slugs([path for _, path in active], cli)
+        for thread, path in active:
             add(_slug_for(path, cli) if path else "", thread.get("providerId") or "bb", "active",
                 thread.get("title") or thread["id"], True, "bb", bb={"thread": thread["id"]})
     except Exception as e:
@@ -1737,7 +1786,11 @@ def _with_jira(items, errors, fetch):
             continue
         key = url.rsplit("/", 1)[-1]
         if cache.get(key):
-            item["jira_issue"] = cache[key]
+            looked_up = dict(cache[key])
+            item["jira_issue"] = looked_up
+            count = looked_up.pop("comment_count", None)   # the item carries it, not the shape
+            if count is not None:
+                item["comment_count"] = count
         else:
             if item.get("jira_guess"):
                 item["jira"] = ""
@@ -1756,7 +1809,7 @@ def _jira_issues(cli, keys):
     returned for each. JQL's `key in (…)` quietly leaves out a key that does not
     exist, which is exactly how one wrong guess is supposed to read."""
     data = cli.json("twg", ["jira", "workitem", "query", "--jql", "key in (%s)" % ", ".join(keys),
-                            "--limit", "100", "--fields", JIRA_FIELDS,
+                            "--limit", "100", "--fields", JIRA_OPEN_FIELDS,
                             "--output", "json", "--output-summary", "none"])["data"]
     out = {}
     for item in data["issues"] if isinstance(data, dict) else data:
@@ -1766,6 +1819,8 @@ def _jira_issues(cli, keys):
             "status": status.get("name", ""),
             "status_category": (status.get("statusCategory") or {}).get("name", ""),
             "type": (item.get("issuetype") or {}).get("name", ""),
+            # the count rides the item rather than the display shape: see _with_jira
+            "comment_count": _jira_comment_count(item),
         }
     return out
 
@@ -2084,11 +2139,14 @@ def snooze(request):
 
 
 def ack(request):
-    """POST /acks {key} acknowledges; {key, clear: true} puts it back."""
+    """POST /acks {key} acknowledges; {key, clear: true} puts it back. The moment is
+    the server's, never the caller's: a time from the body would park the card
+    until then, and no change could release it — `lastChangedAt` never passes a
+    future ack."""
     key = (request or {}).get("key") or ""
     if not key:
         return {"error": "key is required"}
-    at = "" if request.get("clear") else (request.get("at") or _iso_utc(datetime.now(timezone.utc)))
+    at = "" if request.get("clear") else _iso_utc(datetime.now(timezone.utc))
     return write_ack(key, at)
 
 

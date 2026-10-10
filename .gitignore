@@ -5,6 +5,10 @@ __pycache__/
 # scratch written by the herdr orchestration runs, not part of the queue
 .herdr-runs/
 
+# prototypes, experiments and diagrams: read them, never commit them
+.scratch/
+*.excalidraw
+
 # generated at runtime by the producer / by parking cards
 attention.json
 snoozes.json
