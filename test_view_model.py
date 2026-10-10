@@ -1208,6 +1208,21 @@ class OpenSessions(unittest.TestCase):
             {"stalkTeams": ["squad-platform", "../evil", 3, "team-payments"]}),
             ["squad-platform", "team-payments"])
 
+    def test_the_committed_default_config_is_what_the_code_does_by_default(self):
+        """`config.default.json` is the one place the defaults are written down and
+        the file a reader copies, so it must not drift from what an absent config
+        resolves to."""
+        path = Path(__file__).parent / "config.default.json"
+        default = json.loads(path.read_text())
+        self.assertEqual(sorted(default), ["specRepos", "stalkTeams", "stalker"])
+        self.assertEqual(attention.spec_repos(default), attention.spec_repos({}))
+        self.assertEqual(attention.stalk_teams(default), attention.stalk_teams({}))
+        self.assertEqual(attention.stalker_on(default), attention.stalker_on({}))
+        self.assertFalse(attention.stalker_on(default))          # the stalker is off out of the box
+        self.assertEqual((default["specRepos"], default["stalkTeams"]), ([], []))
+        # and a missing config file is those defaults, not an error
+        self.assertEqual(attention.load_config(str(path)), default)
+
     def test_the_roster_leaves_me_out_and_the_you_row_carries_my_login(self):
         """You are the "You" row, so the roster below is everyone else — a roster
         that names you twice is a roster you stop reading. My login rides along
@@ -1221,7 +1236,8 @@ class OpenSessions(unittest.TestCase):
                 return {"name": "Ada Lovelace"}
 
         with mock.patch.object(attention, "LIVE", Live()):
-            out = attention.team_members(config={"stalkTeams": ["squad-platform"]}, me="albertvila")
+            out = attention.team_members(config={"stalkTeams": ["squad-platform"], "stalker": True},
+                                            me="albertvila")
         self.assertEqual(out["you"], {"login": "albertvila"})
         self.assertEqual([p["login"] for p in out["people"]], ["teammate-one"])     # bots and me left out
         self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
@@ -1230,9 +1246,11 @@ class OpenSessions(unittest.TestCase):
         """`stalker: false` is the whole feature off: no faces to click and no
         queue read behind one, without touching the team list itself."""
         teams = {"stalkTeams": ["squad-platform"]}
-        self.assertTrue(attention.stalker_on({}))          # absent is on
+        # off unless asked for: reading someone else's queue is opt-in
+        self.assertFalse(attention.stalker_on({}))
+        self.assertFalse(attention.stalker_on(dict(teams, stalker="no")))
+        self.assertFalse(attention.stalker_on(dict(teams, stalker="true")))   # only `true` is true
         self.assertTrue(attention.stalker_on(dict(teams, stalker=True)))
-        self.assertTrue(attention.stalker_on({"stalker": "no"}))
         off = dict(teams, stalker=False)
         self.assertFalse(attention.stalker_on(off))
         self.assertEqual(attention.team_members(config=off), {"you": {}, "people": []})

@@ -39,12 +39,14 @@ the snapshot it is showing is over an hour old.
 
 One file: `config.json`, beside the snapshot. It is read per request, so an
 edit lands on your next look with no restart, and it is gitignored — your knobs
-are yours.
+are yours. `config.default.json` is the committed baseline: copy it and change
+what you want, or leave `config.json` out entirely and you get exactly these.
 
 ```json
 {
-  "specRepos": ["acme/checkout-api"],
-  "stalkTeams": ["squad-platform", "team-payments"]
+  "specRepos": [],
+  "stalkTeams": [],
+  "stalker": false
 }
 ```
 
@@ -52,7 +54,7 @@ are yours.
 |---|---|---|
 | `specRepos` | `[]` | repos where the **Specs** rail takes every `spec`-labelled issue, whoever wrote it — for reading a teammate's proposal before someone takes it. Everywhere else the rail is yours alone. With watched rows in play the rail splits into **Mine** and **Watched repos**, each row showing its writer's avatar, the login on hover. |
 | `stalkTeams` | `[]` | GitHub team slugs whose members appear under Ongoing work. Click one to see their queue. You are the first row — **You**, wearing your own avatar — and never appear in the list below it, so no face is on the panel twice. Empty means no team list. |
-| `stalker` | on | The switch over that whole feature: `false` hides the team faces and refuses `/queue`, so nothing is read as anyone else — your `stalkTeams` list stays as it is. Absent means on. |
+| `stalker` | `false` | The switch over that whole feature, and **off unless `true`**: reading somebody else's queue is the one thing here that reaches past this machine. Off, the team faces are not there and `/queue` refuses, so nothing is read as anyone else — your `stalkTeams` list stays where it is. |
 
 ### What needs your machine
 
@@ -264,8 +266,9 @@ git remote, so no name guessing is involved.
 The **Team** box at the top of that rail is the roster of the teams in
 `stalkTeams` — the one way into somebody else's queue. **You** is the first row
 and wears your own avatar; the list under it is everyone else, so nobody is on
-the panel twice, and the roster read knows who to leave out. `stalker: false`
-takes the whole box away rather than emptying it.
+the panel twice, and the roster read knows who to leave out. The box is opt-in
+(`stalker: true`), and with it off the box is not there at all rather than there
+and empty.
 
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and

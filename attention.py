@@ -1374,10 +1374,12 @@ def spec_repos(config):
 
 
 def stalker_on(config):
-    """`stalker`: the switch over the whole teammate queue. Absent is on — an
-    empty `stalkTeams` is already an off — so only an explicit false closes it,
-    and your team list stays where it is while it is closed."""
-    return config.get("stalker") is not False
+    """`stalker`: the switch over the whole teammate queue, and it is off unless
+    asked for — reading someone else's queue is the one thing here that reaches
+    past this machine, so it is opt-in, the way `config.default.json` has it. A
+    `stalkTeams` list is not the switch: it stays where it is while the feature is
+    closed."""
+    return config.get("stalker") is True
 
 
 def stalk_teams(config):
