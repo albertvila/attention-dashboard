@@ -1038,10 +1038,6 @@ class CliError(RuntimeError):
         super().__init__(output)
 
 
-# Machine accounts the org's teams carry: a login like any other, wearing no
-# `[bot]` suffix for the test every other read uses, so the roster names them
-# itself. Everyone else on a team is a face you can click.
-STALK_BOTS = {"bit-github-lm", "lm-sec-github"}
 STALK_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 STALK_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
@@ -1440,6 +1436,17 @@ def stalk_teams(config):
     if not isinstance(values, list):
         return []
     return [v.strip() for v in values if isinstance(v, str) and STALK_SLUG.match(v.strip() or "")]
+
+
+def stalk_bots(config):
+    """`stalkBots`: the logins to leave off the roster — machine accounts a team
+    carries, which wear a login like anyone's and no `[bot]` suffix for the one
+    test every other read uses. Yours to name in config.json, so whose faces the
+    panel leaves out is a setting rather than a list in the code."""
+    values = config.get("stalkBots")
+    if not isinstance(values, list):
+        return set()
+    return {v.strip() for v in values if isinstance(v, str) and STALK_LOGIN.match(v.strip() or "")}
 
 
 # --- what a card's comments say, read at the time of the look ----------------
@@ -1938,15 +1945,17 @@ def _error(where, exc):
 
 
 def team_members(config=None, me=None):
-    """Members of `stalkTeams` in config.json under `people` — bots and *me* left
-    out, because the reader is the "You" row and a roster that names you twice is
-    a roster you stop reading. My own login rides along as `you`, since the avatar
-    on that row has to come from somewhere. Not the snapshot: read each request,
-    so editing the file changes the rail on the next look."""
+    """Members of `stalkTeams` in config.json under `people` — the logins named in
+    `stalkBots` and *me* left out, because the reader is the "You" row and a roster
+    that names you twice is a roster you stop reading. My own login rides along as
+    `you`, since the avatar on that row has to come from somewhere. Not the
+    snapshot: read each request, so editing the file changes the rail on the next
+    look."""
     config = load_config() if config is None else config
     if not stalker_on(config):
         return {"you": {}, "people": []}      # no switch, no box, no who-am-I read
     me = me if me is not None else _whoami(partial(LIVE.json, "gh"))
+    bots = stalk_bots(config)
     people = {}
     for slug in stalk_teams(config):
         try:
@@ -1955,7 +1964,7 @@ def team_members(config=None, me=None):
             continue
         for member in members:
             login = member.get("login") or ""
-            if not login or login in STALK_BOTS or login == me:
+            if not login or login in bots or login == me:
                 continue
             person = people.setdefault(login, {"login": login, "name": login, "teams": []})
             if slug not in person["teams"]:

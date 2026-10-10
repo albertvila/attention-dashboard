@@ -1246,11 +1246,11 @@ class OpenSessions(unittest.TestCase):
         says which read it came from, so a rail can keep the two apart."""
         cli = self.Fake(issues=[self.spec(10, "acme/shared-lib", author="you")],
                         issues_by_repo={"acme/checkout-api":
-                                        [self.spec(7, "acme/checkout-api", author="djo19")]})
+                                        [self.spec(7, "acme/checkout-api", author="spec-author")]})
         out = attention.spec_issues(cli=cli, config={"specRepos": ["acme/checkout-api"]})
         self.assertEqual([i["ref"] for i in out["issues"]],
                          ["acme/shared-lib#10", "acme/checkout-api#7"])
-        self.assertEqual([i["author"] for i in out["issues"]], ["you", "djo19"])
+        self.assertEqual([i["author"] for i in out["issues"]], ["you", "spec-author"])
         self.assertEqual([i["watched"] for i in out["issues"]], [False, True])
         # The two searches run at once, so which answers first is not the test:
         # each asks for what it should, and mine still wins the merge above.
@@ -1285,6 +1285,12 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(attention.stalk_teams(
             {"stalkTeams": ["squad-platform", "../evil", 3, "team-payments"]}),
             ["squad-platform", "team-payments"])
+        # the logins the roster leaves out are the reader's own setting
+        self.assertEqual(attention.stalk_bots({}), set())
+        self.assertEqual(attention.stalk_bots({"stalkBots": "org-machine"}), set())
+        self.assertEqual(attention.stalk_bots(
+            {"stalkBots": ["org-machine", "../evil", 3, "other-machine"]}),
+            {"org-machine", "other-machine"})
 
     def test_the_committed_default_config_is_what_the_code_does_by_default(self):
         """`config.default.json` is the one place the defaults are written down and
@@ -1292,12 +1298,14 @@ class OpenSessions(unittest.TestCase):
         resolves to."""
         path = Path(__file__).parent / "config.default.json"
         default = json.loads(path.read_text())
-        self.assertEqual(sorted(default), ["specRepos", "stalkTeams", "stalker"])
+        self.assertEqual(sorted(default), ["specRepos", "stalkBots", "stalkTeams", "stalker"])
         self.assertEqual(attention.spec_repos(default), attention.spec_repos({}))
         self.assertEqual(attention.stalk_teams(default), attention.stalk_teams({}))
+        self.assertEqual(attention.stalk_bots(default), attention.stalk_bots({}))
         self.assertEqual(attention.stalker_on(default), attention.stalker_on({}))
         self.assertFalse(attention.stalker_on(default))          # the stalker is off out of the box
-        self.assertEqual((default["specRepos"], default["stalkTeams"]), ([], []))
+        self.assertEqual((default["specRepos"], default["stalkTeams"], default["stalkBots"]),
+                         ([], [], []))
         # and a missing config file is those defaults, not an error
         self.assertEqual(attention.load_config(str(path)), default)
 
@@ -1314,21 +1322,22 @@ class OpenSessions(unittest.TestCase):
             def json(self, command, args):
                 if "squad-platform" in args[1]:
                     return [{"login": "you"}, {"login": "teammate-one"},
-                            {"login": "lm-sec-github"}, {"login": "lm-qinfei"}]
+                            {"login": "org-machine"}, {"login": "teammate-three"}]
                 if "team-payments" in args[1]:
                     return [{"login": "teammate-one"}, {"login": "teammate-two"}]
                 raise AssertionError("a name read must be batched, not per member")
 
             def graphql(self, query):
-                return {"data": {"n0": {"login": "ribugent", "name": "Ada Lovelace"}}}
+                return {"data": {"n0": {"login": "teammate-one", "name": "Ada Lovelace"}}}
 
         with mock.patch.object(attention, "LIVE", Live()):
             out = attention.team_members(config={"stalkTeams": ["squad-platform", "team-payments"],
+                                                "stalkBots": ["org-machine"],
                                                 "stalker": True}, me="you")
         self.assertEqual(out["you"], {"login": "you"})
-        # a machine account and me left out; a named login doing the work stays
+        # a login named in stalkBots and me left out; a name doing the work stays
         self.assertEqual([p["login"] for p in out["people"]],
-                         ["teammate-one", "lm-qinfei", "teammate-two"])
+                         ["teammate-one", "teammate-three", "teammate-two"])
         self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
         # the faces the box groups by: one team, or both when the read listed them twice
         self.assertEqual(out["people"][0]["teams"], ["squad-platform", "team-payments"])

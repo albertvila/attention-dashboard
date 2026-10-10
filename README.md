@@ -54,6 +54,7 @@ what you want, or leave `config.json` out entirely and you get exactly these.
 |---|---|---|
 | `specRepos` | `[]` | repos where the **Specs** rail takes every `spec`-labelled issue, whoever wrote it — for reading a teammate's proposal before someone takes it. Everywhere else the rail is yours alone. With watched rows in play the rail splits into **Mine** and **Watched repos**, each row showing its writer's avatar, the login on hover. |
 | `stalkTeams` | `[]` | GitHub team slugs whose members appear under Ongoing work, one group per team and each named by its slug — somebody on two teams stands under each. Click one to see their queue. You are the first row — **You**, wearing your own avatar — and never appear in the groups below it, so the reader is never twice on the panel. Empty means no team list. |
+| `stalkBots` | `[]` | Logins to leave off that roster: the machine accounts a team carries, which have a login like anyone's and no `[bot]` suffix for the one test every other read uses. Yours to name, so whose faces the panel leaves out is your setting and not a list in the code. |
 | `stalker` | `false` | The switch over that whole feature, and **off unless `true`**: reading somebody else's queue is the one thing here that reaches past this machine. Off, the team faces are not there and `/queue` refuses, so nothing is read as anyone else — your `stalkTeams` list stays where it is. |
 
 ### What needs your machine
@@ -272,11 +273,10 @@ The **Team** box at the top of that rail is the roster of the teams in
 `stalkTeams` — the one way into somebody else's queue. **You** is the first row
 and wears your own avatar; under it the roster comes grouped by team, each group
 named by its slug, because a roster is membership: somebody on two teams stands
-under each, and the reader is never in the groups — neither are the machine
-accounts the org's teams carry (`bit-github-lm`, `lm-sec-github`), which wear no
-`[bot]` suffix for GitHub to flag, so the read names them itself. The box is
-opt-in (`stalker: true`), and with it off the box is not there at all rather than
-there and empty.
+under each, and the reader is never in the groups, nor is a login named in
+`stalkBots` — the machine accounts, which wear no `[bot]` suffix for GitHub to
+flag. The box is opt-in (`stalker: true`), and with it off the box is not there at
+all rather than there and empty.
 
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and

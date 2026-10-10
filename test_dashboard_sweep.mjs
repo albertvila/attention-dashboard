@@ -204,7 +204,7 @@ assert.ok(asked.includes('RBT-9') && asked.includes('FIRE-71'),
    above them and never inside a group. A face the read gave no team at all keeps
    a row rather than falling off the panel. */
 const T = mount({ railsSilent: true, team: {
-  you: { login: 'albertvila' },
+  you: { login: 'me' },
   people: [{ login: 'ana', name: 'Ana Plaza', teams: ['team-den'] },
            { login: 'bo', name: 'Bo Diaz', teams: ['squad-data', 'team-den'] },
            { login: 'cy', name: 'Cy Ruiz', teams: ['squad-data'] },
@@ -212,7 +212,7 @@ const T = mount({ railsSilent: true, team: {
 await tick(); await tick();
 const roster = T.titles.filter(t => String(t.cls).startsWith('teammate')).map(t => t.title);
 assert.deepEqual(T.textsOf('teamname'), ['squad-data', 'team-den'], 'one group per team, named by its slug');
-assert.deepEqual(roster, ['albertvila', 'Di Solo', 'Bo Diaz', 'Cy Ruiz', 'Ana Plaza', 'Bo Diaz'],
+assert.deepEqual(roster, ['me', 'Di Solo', 'Bo Diaz', 'Cy Ruiz', 'Ana Plaza', 'Bo Diaz'],
   'you first, then each team\u2019s members, the two-team face under both, a teamless face still on it');
 
 console.log('dashboard sweep: all checks passed');
