@@ -393,6 +393,24 @@
     }
 
     const formatWhen = iso => 'until ' + new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    /* Four of the choices are moments, not offsets: 09:00 tomorrow and 09:00
+       next Monday, on the reader's own clock. The instant is computed here
+       because this is the only place that knows the reader's timezone — the
+       server is handed the moment, never the hours. From a Monday, "next Monday"
+       is the Monday of next week, not today. */
+    const atNine = days => {
+      const d = new Date(now);
+      d.setDate(d.getDate() + days);
+      d.setHours(9, 0, 0, 0);
+      return d.toISOString();
+    };
+    const mondayAhead = ((1 - new Date(now).getDay() + 7) % 7) || 7;
+    const choices = [
+      { value: new Date(Date.parse(now) + 4 * 60 * 60 * 1000).toISOString(), label: '4 hours' },
+      { value: atNine(1), label: 'Tomorrow 09:00' },
+      { value: atNine(mondayAhead), label: 'next Monday 09:00' },
+      { value: 'ack', label: 'until it changes' },
+    ];
     const changeLabel = f => f.kind === 'new' ? 'new' : f.kind === 'gone' ? 'dropped' : (f.label || 'changed');
     // a move out of the needs tier reads green; into it, amber.
     const changeTone = f => !f ? ''
@@ -407,14 +425,8 @@
       flag: row => flagOf(row, since),
       closed: isClosed,
       factsOf, kidsOf,
-      tiers, folds, notes, nextCard, counts, summaryText, silentCount, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
-      choices: [
-        { value: '4', label: '4 hours' },
-        { value: '24', label: '1 day' },
-        { value: '72', label: '3 days' },
-        { value: '168', label: '1 week' },
-        { value: 'ack', label: 'until it changes' },
-      ],
+      tiers, folds, notes, nextCard, counts, summaryText, silentCount, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** What one control offers: three moments, or "ack" (until it changes). */
+      choices,
     };
   }
 

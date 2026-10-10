@@ -489,7 +489,19 @@ assert.equal(globalThis.AttentionView.stale({}, { producer: { code: 'new' } }).s
 assert.equal(globalThis.AttentionView.stale({}, null).stale, false);                          // static hosting: unknown
 
 // --- choices and labels -----------------------------------------------------
-assert.deepEqual(view.choices.map(c => c.value), ['4', '24', '72', '168', 'ack']);
+// The snooze choices are moments on the reader's own clock — the one clock that
+// knows where 09:00 is — so what they say is what they mean.
+assert.deepEqual(view.choices.map(c => c.label),
+  ['4 hours', 'Tomorrow 09:00', 'next Monday 09:00', 'until it changes']);
+const clockOf = label => { const d = new Date(view.choices.find(c => c.label === label).value); return [d.getDay(), d.getHours(), d.getMinutes()]; };
+assert.deepEqual(clockOf('Tomorrow 09:00').slice(1), [9, 0]);            // at nine, tomorrow
+assert.deepEqual(clockOf('next Monday 09:00'), [1, 9, 0]);               // the next Monday, at nine
+assert.ok(new Date(view.choices.find(c => c.label === '4 hours').value) - new Date(NOW) === 4 * 60 * 60 * 1000);
+// from a Monday, "next Monday" is next week's — not this morning
+const mondayChoice = iso => new Date(overlay(data(), { now: iso }).choices.find(c => c.label === 'next Monday 09:00').value);
+assert.equal(mondayChoice('2026-10-05T12:00:00.000Z').getDate(), 12);
+assert.equal(mondayChoice('2026-10-04T12:00:00.000Z').getDate(), 5);    // from a Sunday: tomorrow
+assert.equal(mondayChoice(NOW).getDate(), 5);                            // from a Friday: the coming Monday
 assert.equal(view.changeLabel({ kind: 'new' }), 'new');
 assert.equal(view.changeLabel({ kind: 'gone' }), 'dropped');
 assert.equal(view.changeLabel({ kind: 'moved', to_tier: 'needs', label: 'a → b' }), 'a → b');

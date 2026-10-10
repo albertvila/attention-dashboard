@@ -284,7 +284,9 @@ reader's terminal.
 Every card carries a quiet `⏰ snooze / ack` picker, always visible and only
 styling up on hover:
 
-- **4 hours / 1 day / 3 days / 1 week** — snoozed: parked until then.
+- **4 hours / 09:00 tomorrow / 09:00 next Monday** — snoozed: parked until that
+  moment. The two morning ones are moments, not offsets, so the instant is
+  computed in the reader's own timezone and the server is handed the moment.
 - **until it changes** — acknowledged: hidden while the card has not moved, and
   back on the board the moment `lastChangedAt` passes your ack. This is the one
   for recurring noise you already know about.
@@ -300,8 +302,8 @@ surface applies the same rule at read time. Expired snoozes fall out on the next
 write.
 
 The backend writing those same files: `GET/POST /snoozes` and `GET/POST /acks`
-on the server (POST `{key, hours}` or `{key, until}`; `hours: 0` wakes;
-`{key, clear: true}` unacks).
+on the server (POST `{key, until}` for a moment, `{key, hours}` for an offset
+from now, `hours: 0` wakes, `{key, clear: true}` unacks).
 
 ## How linking works
 

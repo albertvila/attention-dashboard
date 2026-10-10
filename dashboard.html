@@ -409,7 +409,7 @@ function render(data){
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Next line — every card you can act on says what it is asking for, in one sentence, from the evidence the board already has: a merged PR the ticket still waits on, a ready PR nobody has merged, a ticket to deploy, an approval you owe — or a comment somebody left after your last look, which outranks the status because a person is waiting. It names that evidence on hover, and it never changes a tier or a count. Two things earn the line: a rule that asks you to do something (shown wherever the card sits), and — in Needs and Ready only — the absence of one, which says the answer is in something the board has not read. The comments are read live, one call per card, reused until the card moves.',
-    'Parking — the picker on each card snoozes it until a time (4 hours / 1 day / 3 days / 1 week) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
+    'Parking — the picker on each card snoozes it until a moment (4 hours, 09:00 tomorrow, 09:00 next Monday — on your own clock, so the server is handed the moment, not the hours) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
   ]));
   paintSpecs();
   paintSessions();
@@ -845,10 +845,14 @@ function child(c){
 }
 
 async function park(key, value){
-  const acking = value === 'ack', unacking = value === 'unack';
+  const acking = value === 'ack', unacking = value === 'unack', waking = value === '0';
+  // The choices are moments the reader's own clock computed (09:00 tomorrow,
+  // 09:00 next Monday), so the moment goes to the server, not the hours. `0` is
+  // the wake button, and a card with no time is a card that is not snoozed.
   const res = await fetch(acking || unacking ? '/acks' : '/snoozes', {
-    method: 'POST', headers: {'content-type': 'application/json'},
-    body: JSON.stringify(acking ? {key} : unacking ? {key, clear: true} : {key, hours: Number(value)})});
+    method: 'POST', headers: {'content-type':'application/json'},
+    body: JSON.stringify(acking ? {key} : unacking ? {key, clear: true}
+                     : waking ? {key, hours: 0} : {key, until: value})});
   const stored = await res.json();
   if(acking || unacking) acks = stored; else snoozes = stored;
   load();
