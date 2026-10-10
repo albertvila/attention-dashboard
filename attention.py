@@ -120,7 +120,6 @@ ISSUE_FIELDS = "number,title,repository,createdAt,updatedAt,url,commentsCount,la
 # title is the name — no second call, GitHub serves `<login>.png`.
 SPEC_FIELDS = "number,title,repository,url,updatedAt,assignees,author"
 
-JIRA_BASE = "https://launchmetrics.atlassian.net/browse/"
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+")
 # Done-category statuses that still need you (deploy work that isn't finished).
 DEPLOY_STATUSES = ("TO_DEPLOY",)
@@ -782,7 +781,7 @@ def _link_side(issue):
     key = issue.get("key")
     fields = issue.get("fields") or {}
     status = fields.get("status") or {}
-    return {"key": key, "url": JIRA_BASE + key,
+    return {"key": key, "url": jira_link(key),
             "status": status.get("name", ""),
             "status_category": (status.get("statusCategory") or {}).get("name", ""),
             "type": (fields.get("issuetype") or {}).get("name", ""),
@@ -835,7 +834,7 @@ def _jira_item(row, *, states, detail="", facts=(), updated=None):
     blocked_by, linked, jira_keys = _jira_links_of(row)
     return _item(
         "JIRA", source="jira", ref=key, title=row.get("summary", ""),
-        url=row.get("url") or JIRA_BASE + key,
+        url=row.get("url") or jira_link(key),
         links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)) + jira_keys,
         blocked_by=blocked_by, linked=linked, states=states, detail=detail, facts=facts,
         comments=_jira_comment_count(row),
@@ -943,14 +942,14 @@ def _ref(repo, number):
 def jira_url(branch):
     """Jira key is the last KEY-123 token in the branch name, if any."""
     keys = JIRA_KEY.findall(branch or "")
-    return JIRA_BASE + keys[-1] if keys else ""
+    return jira_link(keys[-1]) if keys else ""
 
 
 def _jira_url_in(text):
     """Jira ticket URL inside GitHub text (issue body) -> browse URL; first wins.
     URL-only on purpose: a bare KEY-123 token false-positives on UTF-8/SHA-256."""
     m = JIRA_REF.search(text or "")
-    return JIRA_BASE + m.group(1) if m else ""
+    return jira_link(m.group(1)) if m else ""
 
 
 def jira_key_in(title):
@@ -958,7 +957,7 @@ def jira_key_in(title):
     can cite an older ticket ("revert RBT-336 hack"), so `_with_jira` unlinks a
     guess Jira does not resolve instead of warning about it."""
     keys = JIRA_KEY.findall(title or "")
-    return JIRA_BASE + keys[0] if keys else ""
+    return jira_link(keys[0]) if keys else ""
 
 
 def _pr_jira(branch="", title="", body=""):
@@ -1436,6 +1435,35 @@ def stalk_teams(config):
     if not isinstance(values, list):
         return []
     return [v.strip() for v in values if isinstance(v, str) and STALK_SLUG.match(v.strip() or "")]
+
+
+def github_org(config):
+    """`githubOrg`: the org `stalkTeams` are read from. A missing or broken value
+    is no roster, not a guess at which org the token can see."""
+    value = config.get("githubOrg")
+    if not isinstance(value, str) or not STALK_SLUG.match(value.strip() or ""):
+        return ""
+    return value.strip()
+
+
+def jira_browse(config=None):
+    """`jiraBase`: the Jira site, no path. Browse links are that site plus
+    `/browse/KEY`. Empty means a key is not turned into a link — the code does not
+    guess a company."""
+    data = load_config() if config is None else config
+    raw = data.get("jiraBase") if isinstance(data, dict) else ""
+    if not isinstance(raw, str):
+        return ""
+    raw = raw.strip().rstrip("/")
+    if not raw.startswith(("https://", "http://")):
+        return ""
+    return raw + "/browse/"
+
+
+def jira_link(key, config=None):
+    """A browse URL for one key, or nothing when `jiraBase` is unset."""
+    base = jira_browse(config)
+    return base + key if base and key else ""
 
 
 def stalk_bots(config):
@@ -1954,12 +1982,16 @@ def team_members(config=None, me=None):
     config = load_config() if config is None else config
     if not stalker_on(config):
         return {"you": {}, "people": []}      # no switch, no box, no who-am-I read
+    org = github_org(config)
+    if not org:
+        return {"you": {}, "people": [],
+                "error": "set githubOrg in config.json \u2014 the roster has no org to read"}
     me = me if me is not None else _whoami(partial(LIVE.json, "gh"))
     bots = stalk_bots(config)
     people = {}
     for slug in stalk_teams(config):
         try:
-            members = LIVE.json("gh", ["api", f"orgs/Launchmetrics/teams/{slug}/members"])
+            members = LIVE.json("gh", ["api", f"orgs/{org}/teams/{slug}/members"])
         except CliError:
             continue
         for member in members:

@@ -24,6 +24,9 @@ from pathlib import Path
 
 import attention
 
+# Same bargain as test_view_model: a fixed site, not the reader's config.json.
+attention.jira_browse = lambda config=None: "https://jira.example/browse/"
+
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "gh_output.json").read_text())
 ME = FIXTURES["me"]
 
@@ -160,7 +163,7 @@ def jira_row(key, summary, status="In Progress", category="In Progress", comment
             "issuetype": {"name": "Task"}, "description": None,
             "comment": {"total": comments},
             "updated": "2026-09-28T10:00:00.000+0200", "created": "2026-09-18T10:00:00.000+0200",
-            "url": attention.JIRA_BASE + key}
+            "url": attention.jira_browse() + key}
 
 
 JIRA_OPEN = [jira_row("RBT-700", "Waiting on a reviewer"),

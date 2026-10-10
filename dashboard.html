@@ -326,6 +326,7 @@ async function load(isRefresh){
     reads.team.then(roster => {
       team = roster && Array.isArray(roster.people) ? roster.people : [];
       me = (roster && roster.you && roster.you.login) || '';
+      teamNote = (roster && typeof roster.error === 'string') ? roster.error : '';
       paintTeam();
     });
     /* The Briefing opens with the sentence; the snapshot's own stamp stays
@@ -413,8 +414,8 @@ function render(data){
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
     'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. A Jira link that is not a dependency gets a line of its own under the card: linked KEY, its type, its status and its summary, open tickets first, so the ticket you raised with another team and are waiting on is readable without opening Jira. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session and raise the app that holds it (herdr focuses the pane\'s tab, bb opens the thread; both bring the window forward, since a jump you cannot see is not a jump). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
-    'Team — the box above the sessions lists the members of the teams config.json names under stalkTeams, one group per team and each named by its slug, so somebody on two teams stands under both. You come first, wearing your own avatar, and are not listed again in the groups below it; click a face to read that person\'s queue, and You to come back to your own.',
-    'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
+    'Team — the box above the sessions lists the members of the teams config.json names under stalkTeams, in the org githubOrg names, one group per team. Somebody on two teams stands under both. You come first, wearing your own avatar, and are not listed again in the groups below; click a face to read that person\'s queue, and You to come back to your own. Logins in stalkBots are left off. No githubOrg, and the box says so instead of looking empty.',
+    'Specs — the left rail lists the open issues you wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually you, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Next line — every card you can act on says what it is asking for, in one sentence, from the evidence the board already has: a merged PR the ticket still waits on, a ready PR nobody has merged, a ticket to deploy, an approval you owe — or a comment somebody left after your last look, which outranks the status because a person is waiting. It names that evidence on hover, and it never changes a tier or a count. Two things earn the line: a rule that asks you to do something (shown wherever the card sits), and — in Needs and Ready only — the absence of one, which says the answer is in something the board has not read. The comments are read live, one call per card, reused until the card moves.',
     'Parking — the picker on each card snoozes it until a moment (4 hours, 09:00 tomorrow, 09:00 next Monday — on your own clock, so the server is handed the moment, not the hours) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
@@ -612,7 +613,7 @@ function paintSessions(){
   paintTeam();
 }
 
-let team = [], me = '';
+let team = [], me = '', teamNote = '';
 /* The teams one face names, and never nothing: a face the roster read gave no
    team keeps a group of its own rather than falling off the panel. */
 const teamsOf = p => Array.isArray(p.teams) && p.teams.length ? p.teams : [''];
@@ -635,9 +636,10 @@ function teammateRow(p){
 function paintTeam(){
   const old = sessionsRail.querySelector('.team');
   if(old) old.remove();
-  if(!team.length) return;      // no teams listed, or the stalker switched off: no box, no way in
+  if(!team.length && !teamNote) return;   // no teams listed, or the stalker switched off: no box
   const box = el('div', 'team');
   box.appendChild(el('h2', null, 'Team'));
+  if(teamNote) box.appendChild(el('p', 'railtip', teamNote));
   /* You are the first row, wearing your own avatar; the groups below are
      everyone else, so the reader is never in the roster. */
   const you = el('button', 'teammate' + (viewing ? '' : ' on'));
@@ -723,7 +725,7 @@ function jiraLinkLine(kind, label, lk){
   const line = el('div','jira-line ' + kind);
   line.appendChild(el('span', kind + '-label', label));
   const a = document.createElement('a');
-  a.className='jira'; a.href=lk.url || ('https://launchmetrics.atlassian.net/browse/'+lk.key);
+  a.className='jira'; a.href=lk.url || '';
   a.target='_blank'; a.rel='noreferrer';
   a.textContent = lk.key;
   line.appendChild(a);

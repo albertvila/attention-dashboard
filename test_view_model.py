@@ -22,6 +22,15 @@ from pathlib import Path
 
 import attention
 
+# Browse links in these tests are a fixed site, not whatever config.json names.
+# The real reader is still checked with an explicit config.
+_jira_browse = attention.jira_browse
+def _browse(config=None):
+    if config is not None:
+        return _jira_browse(config)
+    return "https://jira.example/browse/"
+attention.jira_browse = _browse
+
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "gh_output.json").read_text())
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
 ME = FIXTURES["me"]
@@ -80,12 +89,12 @@ class ReviewRequests(unittest.TestCase):
         view, _ = build()
         row = find(view, "web-frontend#2018")
         self.assertEqual(row["author"], "reviewer-two")
-        self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/BIT-9001")
+        self.assertEqual(row["jira"], attention.jira_browse() + "BIT-9001")
         self.assertEqual(row["container"], "acme/web-frontend")
         # no key in the branch: the bare key in the title names the ticket
         self.assertIn("BIT-9002", find(view, "web-frontend#2017")["title"])
         self.assertEqual(find(view, "web-frontend#2017")["jira"],
-                         "https://launchmetrics.atlassian.net/browse/BIT-9002")
+                         attention.jira_browse() + "BIT-9002")
 
     def test_labels_are_normalized(self):
         rows = [{"number": 1, "title": "t", "url": "u", "isDraft": False,
@@ -117,11 +126,11 @@ class OwnPRs(unittest.TestCase):
         view, _ = build()
         row = find(view, "checkout-api#334")
         self.assertEqual(row["author"], "you")
-        self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/FIRE-9001")
+        self.assertEqual(row["jira"], attention.jira_browse() + "FIRE-9001")
         self.assertEqual(row["container"], "acme/checkout-api")
         self.assertEqual(row["labels"], [])
         row = find(view, "web-frontend#1933")
-        self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9001")
+        self.assertEqual(row["jira"], attention.jira_browse() + "RBT-9001")
 
     def test_a_pr_title_key_links_as_a_guess(self):
         """A PR whose branch has no key and whose body has no browse URL links
@@ -134,11 +143,11 @@ class OwnPRs(unittest.TestCase):
                 "closingIssuesReferences": [], "createdAt": "2026-09-29T08:00:00Z",
                 "updatedAt": "2026-09-29T09:00:00Z"}
         item = attention._pr_item(view, ["waiting"], [], {})
-        self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9005")
+        self.assertEqual(item["jira"], attention.jira_browse() + "RBT-9005")
         self.assertTrue(item["jira_guess"])
         # a key in the branch, or a browse URL in the body, is deliberate instead
         for deliberate in (dict(view, headRefName="fix/RBT-9005-es-proxy"),
-                           dict(view, body="Ticket: https://launchmetrics.atlassian.net/browse/RBT-9005")):
+                           dict(view, body="Ticket: https://example.atlassian.net/browse/RBT-9005")):
             self.assertNotIn("jira_guess", attention._pr_item(deliberate, ["waiting"], [], {}))
         # the review queue and the closed log follow the same rule
         self.assertTrue(attention._review_item(
@@ -159,7 +168,7 @@ class OwnPRs(unittest.TestCase):
         self.assertEqual((item["jira"], errors), ("", []))       # a guess unlinks, silently
         errors = []
         attention._with_jira([attention._item("MY PR", ref="o/r#7",
-                                              jira="https://launchmetrics.atlassian.net/browse/RBT-9")],
+                                              jira="https://example.atlassian.net/browse/RBT-9")],
                              errors, fetch=missing)
         self.assertEqual([e["where"] for e in errors], ["jira RBT-9"])   # a link that breaks still says so
 
@@ -313,7 +322,7 @@ class JiraSource(unittest.TestCase):
         ]
         item = attention.items_from_jira(rows)[0]
         self.assertEqual(item["blocked_by"], [{
-            "key": "FIDI-275", "url": attention.JIRA_BASE + "FIDI-275",
+            "key": "FIDI-275", "url": attention.jira_browse() + "FIDI-275",
             "status": "In Progress", "status_category": "In Progress", "type": "Bug",
             "summary": "soda checks fail while the enrichment takes 2h"}])
         # it rides to the row the surface renders
@@ -345,10 +354,10 @@ class JiraSource(unittest.TestCase):
                  ]}]
         item = attention.items_from_jira(rows)[0]
         self.assertEqual(item["linked"], [
-            {"key": "FISRE-27667", "url": attention.JIRA_BASE + "FISRE-27667",
+            {"key": "FISRE-27667", "url": attention.jira_browse() + "FISRE-27667",
              "status": "In Progress", "status_category": "In Progress", "type": "Service Request",
              "summary": "rotate the leaked secrets"},
-            {"key": "RBT-433", "url": attention.JIRA_BASE + "RBT-433",
+            {"key": "RBT-433", "url": attention.jira_browse() + "RBT-433",
              "status": "Discard", "status_category": "Done", "type": "Bug",
              "summary": "the discarded work ticket"}])
         self.assertEqual([b["key"] for b in item["blocked_by"]], ["FIDI-1"])
@@ -534,7 +543,7 @@ class JiraSource(unittest.TestCase):
         self.assertEqual(attention.humanize_age(items[0]["times"]["updated"], NOW), "22h")
         self.assertEqual(items[1]["states"], ["not-started"])
         self.assertEqual(items[1]["facts"], [{"label": "To Do", "tone": "waiting"}])
-        self.assertEqual(items[1]["url"], "https://launchmetrics.atlassian.net/browse/RBT-2")
+        self.assertEqual(items[1]["url"], attention.jira_browse() + "RBT-2")
         self.assertEqual(items[2]["states"], ["to-deploy"])
         self.assertEqual(items[2]["facts"], [{"label": "TO_DEPLOY", "tone": "warn"}])
         view = attention.build_view(items, now=NOW)
@@ -702,7 +711,7 @@ class ClosedLog(unittest.TestCase):
         item = attention._closed_pr_item(node, "MY PR")
         self.assertEqual(item["states"], ["merged"])
         self.assertEqual(item["links"], ["o/r#2", "o/r#3"])
-        self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/ABC-1")
+        self.assertEqual(item["jira"], attention.jira_browse() + "ABC-1")
         self.assertEqual(item["labels"], [{"name": "bug", "color": "d73a4a"}])
         node["state"] = "CLOSED"
         item = attention._closed_pr_item(node, "REVIEWED")
@@ -716,23 +725,23 @@ class ClosedLog(unittest.TestCase):
         node = {"number": 2345, "title": "fix: read document deletions gold from the stage catalog",
                 "url": "u", "state": "MERGED", "closedAt": "2026-09-29T09:00:00Z",
                 "createdAt": "2026-09-01T09:00:00Z", "headRefName": "fix/stage-dependent-document-deletions",
-                "body": "Summary.\n\nTicket: https://launchmetrics.atlassian.net/browse/RBT-9005",
+                "body": "Summary.\n\nTicket: https://example.atlassian.net/browse/RBT-9005",
                 "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
                 "labels": {"nodes": []}, "closingIssuesReferences": {"nodes": []}}
         self.assertEqual(attention._closed_pr_item(node, "MY PR")["jira"],
-                         "https://launchmetrics.atlassian.net/browse/RBT-9005")
+                         attention.jira_browse() + "RBT-9005")
 
     def test_closed_issue_item_links_parent_subissues_and_prs(self):
         node = {"number": 2, "title": "t", "url": "u", "closedAt": "2026-09-29T09:00:00Z",
                 "createdAt": "2026-09-01T09:00:00Z", "repository": {"nameWithOwner": "o/r"},
-                "body": "Jira spec: https://launchmetrics.atlassian.net/browse/RBT-7",
+                "body": "Jira spec: https://example.atlassian.net/browse/RBT-7",
                 "labels": {"nodes": []},
                 "parent": {"number": 1, "repository": {"nameWithOwner": "o/r"}},
                 "subIssues": {"nodes": [{"number": 3, "repository": {"nameWithOwner": "o/r"}}]},
                 "closedByPullRequestsReferences": {"nodes": [{"number": 5, "repository": {"nameWithOwner": "o/r"}}]}}
         item = attention._closed_issue_item(node)
         self.assertEqual(sorted(item["links"]), ["o/r#1", "o/r#3", "o/r#5"])
-        self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-7")
+        self.assertEqual(item["jira"], attention.jira_browse() + "RBT-7")
 
     def test_closed_jira_uses_status_change_date(self):
         rows = [{"key": "ABC-1", "summary": "s", "url": "u",
@@ -774,7 +783,7 @@ class ClosedLog(unittest.TestCase):
                                  times={"updated": "2026-09-29T09:00:00Z"})
         merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
                                  times={"updated": "2026-09-29T09:30:00Z"},
-                                 jira=attention.JIRA_BASE + "FIRE-1")
+                                 jira=attention.jira_browse() + "FIRE-1")
         view = attention.build_view([ticket], now=NOW, closed=[merged])
         cards = {t["key"]: t["items"] for t in view["tiers"]}
         self.assertEqual([r["ref"] for r in cards["ready"]], ["FIRE-1"])
@@ -860,7 +869,7 @@ class ClosedLog(unittest.TestCase):
                                  times={"updated": "2026-09-29T09:00:00Z"})
         merged = attention._item("MY PR", container="o/r", ref="r#7", states=["merged"],
                                  times={"updated": "2026-09-29T09:30:00Z"},
-                                 jira=attention.JIRA_BASE + "FIRE-1")
+                                 jira=attention.jira_browse() + "FIRE-1")
         view = attention.build_view([ticket], now=NOW, closed=[merged])
         cards = [i for t in view["tiers"] for i in t["items"]]
         self.assertEqual(len(cards), 1)
@@ -937,11 +946,11 @@ class AssignedIssues(unittest.TestCase):
     def test_issue_body_jira_spec_links_the_cards(self):
         view = {"number": 2330, "title": "Drop stories from the final files",
                 "url": "https://github.com/acme/payments-api/issues/2330",
-                "body": "## Parent\n\nJira spec: https://launchmetrics.atlassian.net/browse/RBT-9003\n",
+                "body": "## Parent\n\nJira spec: https://example.atlassian.net/browse/RBT-9003\n",
                 "comments": [], "labels": [],
                 "updatedAt": "2026-09-29T10:00:00Z", "createdAt": "2026-09-29T09:00:00Z"}
         item = attention._issue_item(view, ["not-started"], [], {})
-        self.assertEqual(item["jira"], "https://launchmetrics.atlassian.net/browse/RBT-9003")
+        self.assertEqual(item["jira"], attention.jira_browse() + "RBT-9003")
         jira = attention._item("JIRA", source="jira", ref="RBT-9003", states=["waiting"])
         built = attention.build_view([item, jira], now=NOW)
         # one card, headed by the Jira ticket; the issue rides under it.
@@ -1039,15 +1048,15 @@ class OrderingAndErrors(unittest.TestCase):
         self.assertEqual(attention._issue_refs_in(None, "o/r"), [])
 
     def test_jira_url_in_only_matches_atlassian_browse_links(self):
-        self.assertEqual(attention._jira_url_in("Jira spec: https://launchmetrics.atlassian.net/browse/RBT-9003 (UTF-8 ok)"),
-                         "https://launchmetrics.atlassian.net/browse/RBT-9003")
+        self.assertEqual(attention._jira_url_in("Jira spec: https://example.atlassian.net/browse/RBT-9003 (UTF-8 ok)"),
+                         attention.jira_browse() + "RBT-9003")
         self.assertEqual(attention._jira_url_in("mentions UTF-8 and RBT-9003 as plain text"), "")
         self.assertEqual(attention._jira_url_in("https://example.com/browse/RBT-9003"), "")
         self.assertEqual(attention._jira_url_in(None), "")
 
     def test_jira_url_only_matches_uppercase_key(self):
         self.assertEqual(attention.jira_url("m-chore-bump_lm_data_unification_3_9_6-FIRE-9001"),
-                         "https://launchmetrics.atlassian.net/browse/FIRE-9001")
+                         attention.jira_browse() + "FIRE-9001")
         self.assertEqual(attention.jira_url("fix-123-something"), "")
         self.assertEqual(attention.jira_url("bb/orchestrate-bb-plan-https-github-com-launchmetri"), "")
         self.assertEqual(attention.jira_url(""), "")
@@ -1291,6 +1300,13 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(attention.stalk_bots(
             {"stalkBots": ["org-machine", "../evil", 3, "other-machine"]}),
             {"org-machine", "other-machine"})
+        self.assertEqual(attention.github_org({}), "")
+        self.assertEqual(attention.github_org({"githubOrg": "../evil"}), "")
+        self.assertEqual(attention.github_org({"githubOrg": "acme"}), "acme")
+        self.assertEqual(_jira_browse({}), "")
+        self.assertEqual(_jira_browse({"jiraBase": "not a url"}), "")
+        self.assertEqual(_jira_browse({"jiraBase": "https://acme.atlassian.net/"}),
+                         "https://acme.atlassian.net/browse/")
 
     def test_the_committed_default_config_is_what_the_code_does_by_default(self):
         """`config.default.json` is the one place the defaults are written down and
@@ -1298,14 +1314,18 @@ class OpenSessions(unittest.TestCase):
         resolves to."""
         path = Path(__file__).parent / "config.default.json"
         default = json.loads(path.read_text())
-        self.assertEqual(sorted(default), ["specRepos", "stalkBots", "stalkTeams", "stalker"])
+        self.assertEqual(sorted(default), ["githubOrg", "jiraBase", "specRepos", "stalkBots",
+                                         "stalkTeams", "stalker"])
         self.assertEqual(attention.spec_repos(default), attention.spec_repos({}))
         self.assertEqual(attention.stalk_teams(default), attention.stalk_teams({}))
         self.assertEqual(attention.stalk_bots(default), attention.stalk_bots({}))
+        self.assertEqual(attention.github_org(default), attention.github_org({}))
+        self.assertEqual(_jira_browse(default), _jira_browse({}))
         self.assertEqual(attention.stalker_on(default), attention.stalker_on({}))
         self.assertFalse(attention.stalker_on(default))          # the stalker is off out of the box
-        self.assertEqual((default["specRepos"], default["stalkTeams"], default["stalkBots"]),
-                         ([], [], []))
+        self.assertEqual((default["specRepos"], default["stalkTeams"], default["stalkBots"],
+                          default["githubOrg"], default["jiraBase"]),
+                         ([], [], [], "", ""))
         # and a missing config file is those defaults, not an error
         self.assertEqual(attention.load_config(str(path)), default)
 
@@ -1315,11 +1335,13 @@ class OpenSessions(unittest.TestCase):
         because the avatar on that row has to come from somewhere. Each person
         carries the teams they were listed under, which is what the box groups
         by."""
+        seen = []
 
         class Live:
             """The roster read: one listing per team, then one query for the names."""
 
             def json(self, command, args):
+                seen.append(args[1])
                 if "squad-platform" in args[1]:
                     return [{"login": "you"}, {"login": "teammate-one"},
                             {"login": "org-machine"}, {"login": "teammate-three"}]
@@ -1333,7 +1355,9 @@ class OpenSessions(unittest.TestCase):
         with mock.patch.object(attention, "LIVE", Live()):
             out = attention.team_members(config={"stalkTeams": ["squad-platform", "team-payments"],
                                                 "stalkBots": ["org-machine"],
+                                                "githubOrg": "acme",
                                                 "stalker": True}, me="you")
+        self.assertIn("orgs/acme/teams/squad-platform/members", seen[0])
         self.assertEqual(out["you"], {"login": "you"})
         # a login named in stalkBots and me left out; a name doing the work stays
         self.assertEqual([p["login"] for p in out["people"]],
@@ -1343,6 +1367,19 @@ class OpenSessions(unittest.TestCase):
         self.assertEqual(out["people"][0]["teams"], ["squad-platform", "team-payments"])
         self.assertEqual(out["people"][1]["teams"], ["squad-platform"])
         self.assertEqual(out["people"][2]["teams"], ["team-payments"])
+
+    def test_a_roster_without_an_org_reads_nothing(self):
+        """No githubOrg is an empty box that says so, not a search of every org."""
+
+        class Live:
+            def json(self, command, args):
+                raise AssertionError("no org, no team read")
+
+        with mock.patch.object(attention, "LIVE", Live()):
+            out = attention.team_members(
+                config={"stalkTeams": ["squad-platform"], "stalker": True}, me="you")
+        self.assertEqual(out["people"], [])
+        self.assertIn("githubOrg", out["error"])
 
     def test_the_stalker_switch_closes_the_teammate_queue(self):
         """`stalker: false` is the whole feature off: no faces to click and no
@@ -1743,7 +1780,7 @@ class SnapshotContract(unittest.TestCase):
         """The face is chosen by kind, not urgency: a Jira ticket names its card
         whatever the PR under it is doing. When the PR breaks, the card lands in
         Needs with the same face and the PR still riding as its child."""
-        jira = "https://launchmetrics.atlassian.net/browse/RBT-1"
+        jira = "https://example.atlassian.net/browse/RBT-1"
         ticket = attention._item("JIRA", source="jira", ref="RBT-1", title="ticket",
                                  states=["to-deploy"], times={"updated": "2026-09-29T08:00:00Z"})
         pr = attention._item("MY PR", container="o/r", ref="r#7", title="pr", jira=jira,
@@ -1764,7 +1801,7 @@ class SnapshotContract(unittest.TestCase):
         """#24: a header names its linked Jira ticket inline rather than as a
         child, so that key is on screen even once the Jira read stops returning
         the item. Calling it dropped ghosts it back into the tier it left."""
-        jira = "https://launchmetrics.atlassian.net/browse/RBT-1"
+        jira = "https://example.atlassian.net/browse/RBT-1"
         ticket = attention._item("JIRA", source="jira", ref="RBT-1", title="ticket",
                                  states=["to-deploy"], times={"updated": "2026-09-29T08:00:00Z"})
         pr = attention._item("MY PR", container="o/r", ref="r#7", title="pr", jira=jira,

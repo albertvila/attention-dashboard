@@ -215,4 +215,9 @@ assert.deepEqual(T.textsOf('teamname'), ['squad-data', 'team-den'], 'one group p
 assert.deepEqual(roster, ['me', 'Di Solo', 'Bo Diaz', 'Cy Ruiz', 'Ana Plaza', 'Bo Diaz'],
   'you first, then each team\u2019s members, the two-team face under both, a teamless face still on it');
 
+const bare = mount({ railsSilent: true, team: { you: {}, people: [], error: 'set githubOrg in config.json' } });
+await tick(); await tick();
+assert.ok(bare.textsOf('railtip').includes('set githubOrg in config.json'),
+  'no org is a line on the box, not an empty roster');
+
 console.log('dashboard sweep: all checks passed');
