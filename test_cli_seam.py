@@ -18,6 +18,7 @@ import json
 import re
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import attention
@@ -356,6 +357,103 @@ class TheSeam(unittest.TestCase):
             cli.json("gh", args)
         self.assertEqual(caught.exception.command, "gh pr checks 1 --repo o/r --json name,state")
         self.assertEqual(caught.exception.output, "no checks reported on the 'fix/x' branch")
+
+
+def comment_row(text, *, at="2026-10-02T11:00:00.000+0200", who="Ada", account="acc-ada", public=True):
+    """One row of `twg jira workitem comment query --output json`."""
+    return {"author": {"displayName": who, "accountId": account}, "created": at, "jsdPublic": public,
+            "body": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": text}]}]}}
+
+
+class Counting(Recorded):
+    """The recording, counting what it answers: a cache is only a cache if the
+    second look does not cross the seam again."""
+
+    def __init__(self, calls):
+        super().__init__(calls)
+        self.count = 0
+
+    def text(self, command, args):
+        self.count += 1
+        return super().text(command, args)
+
+
+class TheCommentRead(unittest.TestCase):
+    """A card's comments are read at the time of the look, one call per card,
+    and reused until the card moves. Everything here is a string a page sent or
+    a CLI answered, so the edges are the interesting ones."""
+
+    def setUp(self):
+        attention.COMMENTS.clear()
+        attention._JIRA_ME.clear()
+
+    def jira(self, key, comments):
+        return answer("twg", ["jira", "workitem", "comment", "query", "--issue-id", key,
+                               "--first", str(attention.COMMENT_MAX), "--order-by=-created",
+                               "--output", "json", "--output-summary", "none"],
+                      {"data": comments})
+
+    def me(self, account="acc-me"):
+        return answer("twg", ["whoami", "--output", "json", "--output-summary", "none"],
+                      {"data": {"accountId": account}})
+
+    def test_adf_is_words_not_markup(self):
+        """Jira sends a comment body as ADF; the line wants the words."""
+        self.assertEqual(attention.adf_text({"type": "doc", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "one"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "two"}]}]}),
+            "one two")
+        self.assertEqual(attention.adf_text("plain"), "plain")
+        self.assertEqual(attention.adf_text(None), "")
+
+    def test_a_comment_names_who_wrote_it_and_whether_it_is_mine(self):
+        cli = Recorded([
+            self.me(),
+            # the command answers newest first; the read hands them back as a thread reads
+            self.jira("FIRE-1", [comment_row("rotated", at="2026-10-02T12:00:00.000+0200",
+                                              who="Me", account="acc-me", public=False),
+                                  comment_row("can you re-run this?")])])
+        found = attention.jira_comments("FIRE-1", cli)
+        self.assertEqual([(c["who"], c["mine"], c["internal"]) for c in found],
+                         [("Ada", False, False), ("Me", True, True)])
+        self.assertEqual([c["at"] for c in found],
+                         ["2026-10-02T09:00:00Z", "2026-10-02T10:00:00Z"])   # UTC, oldest first
+        self.assertEqual(found[0]["text"], "can you re-run this?")
+
+    def test_only_a_jira_key_is_read_and_the_answer_is_reused_until_the_card_moves(self):
+        """The cache key is the card's own stamp: an unmoved card is not read
+        twice, a card that has moved is read again."""
+        class Shifting(attention.Cli):
+            """A ticket whose thread grew between two looks."""
+
+            def __init__(self):
+                self.reads = 0
+
+            def text(self, command, args):
+                if args[:1] == ["whoami"]:
+                    return json.dumps({"data": {"accountId": "acc-me"}})
+                self.reads += 1
+                return json.dumps({"data": [comment_row("hello" if self.reads == 1 else "moved on")]})
+
+        cli = Shifting()
+        with mock.patch.object(attention, "card_stamps", lambda: {"FIRE-1": "stamp-a"}):
+            # a key off the card is not a ticket: a page can send anything, and
+            # this one would be an argument to a CLI
+            self.assertEqual(attention.live_comments(["--jql", "o/r#1", "FIRE-1"], cli).keys(), {"FIRE-1"})
+            self.assertEqual(cli.reads, 1)
+            self.assertEqual(attention.live_comments(["FIRE-1"], cli)["FIRE-1"][0]["text"], "hello")
+            self.assertEqual(cli.reads, 1)              # unmoved: the answer already stood
+        with mock.patch.object(attention, "card_stamps", lambda: {"FIRE-1": "stamp-b"}):
+            self.assertEqual(attention.live_comments(["FIRE-1"], cli)["FIRE-1"][0]["text"], "moved on")
+            self.assertEqual(cli.reads, 2)              # moved: read again
+
+    def test_a_read_that_fails_costs_only_its_own_line(self):
+        cli = Counting([self.me(), self.jira("FIRE-1", [comment_row("hello")])])
+        with mock.patch.object(attention, "card_stamps", lambda: {"FIRE-1": "s", "FIRE-2": "s"}):
+            out = attention.live_comments(["FIRE-2", "FIRE-1"], cli)      # FIRE-2 has no recording
+            self.assertNotIn("FIRE-2", out)
+            self.assertEqual(out["FIRE-1"][0]["text"], "hello")
 
 
 class ThePerCardPool(unittest.TestCase):

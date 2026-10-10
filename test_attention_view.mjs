@@ -369,6 +369,62 @@ assert.equal(overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] },
                                     { key: 'waiting', title: 'w', items: [sup()] }] }), { now: NOW }).nextCard(),
   'Nothing needs you. Next: o/r#7 · ready');   // a support card waits: it is never the next pick-up
 
+// --- the next line: what a card is asking for --------------------------------
+// A rule that asks you to do something is marked so a surface may show it
+// wherever the card sits; a rule that only says you are waiting is marked so the
+// surface can leave it out — that is what the tier already means.
+const kid = (over = {}) => ({ ref: 'o/r#1', title: 'a PR', chip: 'MY PR', states: [], times: {}, ...over });
+let nl = view.nextOf(row({ children: [kid({ states: [{ key: 'ready', label: 'ready', tier: 'ready', tone: 'good' }] })] }));
+assert.equal(nl.next.say, 'merge o/r#1 — approved and green, nothing blocks it');
+assert.equal(nl.next.act, true);
+assert.equal(nl.rule.id, 'merge-a-ready-pr');
+
+// a merged member leaves the ticket behind, in each shape that comes up
+nl = view.nextOf(row({ states: [{ key: 'to-deploy', label: 'to deploy', tier: 'ready', tone: 'info' }],
+                       children: [kid({ states: [{ key: 'merged', label: 'merged', tier: 'ready', tone: 'good' }] })] }));
+assert.match(nl.next.say, /^ship it — the work is already merged/);
+nl = view.nextOf(row({ facts: [{ label: 'Ready to Test' }],
+                       children: [kid({ states: [{ key: 'merged', label: 'merged', tier: 'ready', tone: 'good' }] })] }));
+assert.match(nl.next.say, /^verify in staging/);
+
+// a Waiting card that owes something still says so — the action is not the tier's
+nl = view.nextOf(row({ facts: [{ label: 'checks green' }, { label: 'merge blocked' }] }));
+assert.match(nl.next.say, /^you need an approval/);
+assert.equal(nl.next.act, true);
+
+// and a card that only waits says so without pretending it is work
+const SUP2 = { key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' };
+nl = view.nextOf(row({ states: [SUP2] }));
+assert.equal(nl.next.say, 'with support — nothing for you until they answer');
+assert.equal(nl.next.act, false);
+// the open link is the wait; the finished one is history
+nl = view.nextOf(row({ states: [SUP2],
+  linked: [{ key: 'FISRE-27667', status: 'In Progress', status_category: 'In Progress' },
+           { key: 'RBT-433', status: 'Discard', status_category: 'Done' }] }));
+assert.equal(nl.next.say, 'wait for FISRE-27667 (In Progress)');
+assert.equal(nl.next.act, false);
+
+// nothing fires: the card names what it would take to have a line at all
+nl = view.nextOf(row({}));
+assert.equal(nl.next, null);
+assert.deepEqual(nl.wanting.map(w => w.needs), ['comment', 'transition']);
+
+// read one more thing and a rule answers, without any other rule changing
+const lineAfter = (reads, comes, ctx) => view.nextOf(row(comes), reads, ctx);
+const LANDED = { comment: [{ at: '2026-10-02T11:30:00.000Z', who: 'Ada', text: 'can you re-run this?' }] };
+assert.match(lineAfter(LANDED, {}, { lastLook: '2026-10-02T11:00:00.000Z' }).next.say,
+  /^answer Ada — they wrote after your last look/);
+assert.equal(lineAfter(LANDED, {}, { lastLook: '2026-10-02T12:00:00.000Z' }).next, null);   // looked since: not news
+assert.equal(lineAfter({}, { states: [SUP2] }, {}).next.act, false);                        // reads change nothing else
+nl = lineAfter({ transition: ['Deploy to Prod', 'Close'] }, { states: [{ key: 'to-deploy', label: 'to deploy', tier: 'ready', tone: 'info' }] }, {});
+assert.match(nl.next.say, /— Jira offers Deploy to Prod, Close$/);
+
+// reading a line never touches the row: this is all read-side
+const untouched = row({ children: [kid({ states: [{ key: 'ready', label: 'ready', tier: 'ready', tone: 'good' }] })] });
+const before = JSON.stringify(untouched);
+view.nextOf(untouched);
+assert.equal(JSON.stringify(untouched), before);
+
 // --- stale-code witness -----------------------------------------------------
 assert.deepEqual(globalThis.AttentionView.stale({ producer: { code: 'aaa' } }, { producer: { code: 'aaa' } }),
   { stale: false, running: 'aaa', snapshot: 'aaa' });

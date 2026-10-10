@@ -43,6 +43,8 @@ function mount(opts = {}) {
   let now = NOW, interval = null, state = 'visible';
   const ctx = {
     console, setTimeout, clearTimeout, Proxy,
+    // the browser's own escape, which the page uses to build a selector from a key
+    CSS: { escape: s => String(s) },
     document: { createElement: () => node(), createTextNode: stub, createDocumentFragment: stub,
                 querySelector: stub, querySelectorAll: () => [], getElementsByTagName: () => [],
                 getElementById: id => (elements[id] ||= stub()), addEventListener(){},
@@ -54,9 +56,12 @@ function mount(opts = {}) {
       if (opts.railsSilent && (String(url).startsWith('/specs') || String(url).startsWith('/sessions'))) {
         return new Promise(() => {});
       }
+      if (opts.comments && String(url).startsWith('/comments')) {
+        return { json: async () => opts.comments };
+      }
       return { json: async () => snapshot(new Date(now).toISOString(), opts.tiers) };
     },
-    localStorage: { getItem: () => stamped.at(-1) ?? null, setItem: (k, v) => stamped.push(v) },
+    localStorage: { getItem: () => opts.seen ?? stamped.at(-1) ?? null, setItem: (k, v) => stamped.push(v) },
     setInterval: (fn, ms) => { interval = { fn, ms }; },
     Date: class extends Date {
       constructor(...a) { super(...(a.length ? a : [now])); }
@@ -156,5 +161,30 @@ assert.ok(L.textsOf('jira').includes('FISRE-27667'), 'so is the ticket you are w
 assert.ok(L.textsOf('jira-summary').includes('rotate the leaked secrets'));
 assert.equal(L.created.filter(c => String(c.cls) === 'badge wip' && c.text === 'In Progress').length, 2,
   'each line carries its own status badge');
+
+/* The comment read lands after the board has painted, and only then does the
+   line change: a thread is not in the snapshot, so the card is rebuilt in place
+   when it arrives. It needs a last look to be newer than — the first look flags
+   nothing, the same rule the change marks follow. */
+const saidCard = {
+  chip: 'JIRA', key: 'RBT-9', ref: 'RBT-9', title: 'a ticket with a thread', url: 'u', container: '',
+  states: [{ key: 'in-progress', label: 'in progress', tier: 'waiting', tone: 'info' }],
+  facts: [], labels: [], children: [], section: 'needs', tier: 'waiting', times: {},
+};
+const saidThread = { 'RBT-9': [
+  { at: '2026-10-07T12:30:00.000Z', who: 'Ada', text: 'can you re-run this?', mine: false }] };
+const saidTiers = [{ key: 'needs', title: 'Needs you now', items: [saidCard] },
+                   { key: 'ready', title: 'Ready when you are', items: [] },
+                   { key: 'waiting', title: 'Waiting on others', items: [] }];
+
+// a first look flags nothing: no stored look, so a thread is not news yet
+const fresh = mount({ railsSilent: true, comments: saidThread, tiers: saidTiers });
+await tick();
+assert.ok(!fresh.textsOf('do').includes('answer Ada'), 'a first look flags nothing, comment or not');
+
+// a reader who has looked before: the comment that landed since is the line
+const C = mount({ railsSilent: true, seen: '2026-10-07T12:00:00.000Z', comments: saidThread, tiers: saidTiers });
+await tick(); await tick();
+assert.ok(C.textsOf('do').includes('answer Ada'), 'the thread lands on the card as the line');
 
 console.log('dashboard sweep: all checks passed');

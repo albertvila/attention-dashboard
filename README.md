@@ -114,6 +114,10 @@ The server adds:
   and active bb threads, read live so it can never be an hour stale
 - `/specs` — the open issues I wrote with the `spec` label and no assignee: a
   backlog, not a queue
+- `/comments?keys=RBT-1,FIRE-2` — the newest comments on those tickets, read live
+  (one call per card, reused until the card has moved): who wrote, when, and what
+  they said. A comment thread is not in the snapshot, for the same reason a
+  session is not — it is not a property of "now" the way a card is
 - `POST /focus` — open one session on this machine (`{kind: herdr|bb, target}`),
   the only write that moves a window rather than a file
 - `/status` — this process's producer stamp versus the snapshot's
@@ -207,6 +211,27 @@ status and its summary — open tickets first, because the open one is the wait.
 A link to a ticket the card already carries (a linked child, or the ticket the
 header shows inline) is not named again: the same key on the same card twice is
 noise.
+
+## The next line on a card
+
+A card you can act on says what it is asking for, in one sentence. Every line is
+**a rule naming the evidence it stands on**, never an opinion: the kind of
+evidence is what a rule reads, and the rule fires on what is there.
+
+Five kinds are free — the state, the facts, the linked items, the Jira links,
+the blockers, all of it already on the row. Three are reads: a ticket's
+**comments**, a PR's **review comments**, and the **transitions Jira allows**
+from the current status. A read costs one call per card, is reused until the card
+has moved (`lastChangedAt` is the cache key), and a read that fails costs that
+one line, never the queue. Comments are read today; the other two kinds are named
+and silent — a rule that needs one is reported as waiting for it rather than
+guessing, which is also how the board says "the answer would be in the comments".
+
+A comment from somebody else, newer than your last look, is the strongest thing a
+card can carry: a human is waiting on you, so it outranks the status. The first
+look flags nothing — the same rule the change marks follow. Nothing here ever
+moves a card, changes a tier or a count, and no model is asked anything: where no
+rule fires, the card says so and names what it would take to have a line.
 
 ## Ongoing work and specs (read beside the snapshot)
 
@@ -304,7 +329,8 @@ one of the references above.
 flags, ghosts (hidden in Needs), the Parked and Drafts folds, the fold summaries
 (oldest age,
 conflicted drafts, the parked kinds — built from the ages already on the rows,
-never a second calculation), the next-card line an empty Needs tier shows (the
+never a second calculation), the next line a card asks for (see below), the
+next-card line an empty Needs tier shows (the
 first Ready card, or nothing when Ready is empty too), and where a card renders.
 The dashboard loads it (the server serves it at `/attention-view.js`), so the
 surfaces cannot drift apart.
@@ -382,6 +408,14 @@ from `attention-view.js`.
   showing its count and the description the rules give it (`oldest 3d`,
   `snoozed until a time, or until the card changes`, …). A fold the rules have
   nothing to say about shows its count only.
+- A card you can act on carries a **next line**: one sentence saying what it is
+  asking for, from the evidence the board already has — a merged PR the ticket
+  still waits on, a ready PR nobody has merged, a ticket to deploy, an approval
+  you owe. It names that evidence on hover and never changes a tier or a count.
+  A rule that asks you to do something shows wherever the card sits; a rule that
+  only says you are waiting shows nowhere, because that is what the tier already
+  means. A card in Needs or Ready with nothing to say says so — the answer is in
+  something the board has not read.
 - A card with linked items carries `N linked` at the row's right, beside age and
   parking, expanding them in place; a card with no links carries no count. Each
   child keeps its own chip, ref, states, facts, labels, detail and age — one

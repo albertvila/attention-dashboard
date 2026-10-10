@@ -1349,6 +1349,122 @@ def stalk_teams(config):
     return [v.strip() for v in values if isinstance(v, str) and STALK_SLUG.match(v.strip() or "")]
 
 
+# --- what a card's comments say, read at the time of the look ----------------
+# Not in the snapshot, for the same reason sessions and specs are not: a comment
+# thread is not a property of "now" the way a card is, and reading one costs a
+# call per card. Read per request, cached by (key, lastChangedAt) so a card that
+# has not moved since the last look is never read twice, and nothing is stored.
+COMMENTS = {}           # key -> (lastChangedAt, [comment])
+COMMENT_MAX = 3         # the newest few: all a "something landed" line needs
+COMMENT_CHARS = 360     # one line's worth, never a wall
+_JIRA_ME = []           # my own account id, once
+
+
+def adf_text(body):
+    """Jira sends a comment body as ADF, not text. Flatten it to the words, with
+    the paragraph and list breaks a reader needs and nothing else."""
+    if isinstance(body, str):
+        return body
+    if not isinstance(body, dict):
+        return ""
+    out = []
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        kind = node.get("type")
+        if kind == "text":
+            out.append(node.get("text") or "")
+            return
+        for child in node.get("content") or []:
+            walk(child)
+        if kind in ("paragraph", "heading", "listItem", "blockquote", "codeBlock", "rule"):
+            out.append("\n")
+
+    walk(body)
+    text = "".join(out)
+    return " ".join(text.split())
+
+
+def _jira_me(cli=None):
+    """My own Jira account id, so a comment I wrote is not news to me."""
+    if _JIRA_ME:
+        return _JIRA_ME[0]
+    try:
+        found = (cli or LIVE).json("twg", ["whoami", "--output", "json", "--output-summary", "none"])
+        _JIRA_ME.append(((found.get("data") or {}).get("accountId") or ""))
+    except Exception:
+        _JIRA_ME.append("")
+    return _JIRA_ME[0]
+
+
+def jira_comments(key, cli=None):
+    """One ticket's newest comments, oldest first: who, when, and the words."""
+    found = (cli or LIVE).json("twg", ["jira", "workitem", "comment", "query", "--issue-id", key,
+                                       "--first", str(COMMENT_MAX), "--order-by=-created",
+                                       "--output", "json", "--output-summary", "none"])
+    rows = found.get("data") if isinstance(found, dict) else found
+    me = _jira_me(cli)
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        author = row.get("author") or {}
+        text = " ".join(adf_text(row.get("body")).split())[:COMMENT_CHARS]
+        if not text:
+            continue
+        out.append({
+            "at": _iso_utc(datetime.fromisoformat(_iso(row.get("created")))) if row.get("created") else "",
+            "who": author.get("displayName") or "someone",
+            "text": text,
+            # a support reply written for the customer's eyes, not an internal note
+            "internal": row.get("jsdPublic") is False,
+            "mine": bool(me) and author.get("accountId") == me,
+        })
+    return list(reversed(out))          # newest last, the way a thread reads
+
+
+def card_stamps():
+    """key -> when the card last moved, off the snapshot on disk. The stamp is
+    what makes the comment read reusable: an unmoved card has the same answer."""
+    try:
+        data = cached_payload()
+    except Exception:
+        return {}
+    rows = [r for tier in data.get("tiers") or [] for r in tier.get("items") or []]
+    rows += (data.get("drafts") or []) + (data.get("closed") or [])
+    return {r.get("key") or r.get("ref"): (r.get("lastChangedAt") or "") for r in rows}
+
+
+def live_comments(keys, cli=None):
+    """{key: [comment]} for the cards a surface is about to draw. A key that is
+    not a Jira key is dropped: it would be an argument to a CLI, and this is a
+    string a page sent. A read that fails costs a line, never the queue."""
+    cli = cli or LIVE
+    stamps, wanted, out = card_stamps(), [], {}
+    for key in keys:
+        if not JIRA_KEY.fullmatch(key or ""):
+            continue
+        stamp = stamps.get(key, "")
+        hit = COMMENTS.get(key)
+        if hit and stamp and hit[0] == stamp:
+            out[key] = hit[1]
+        else:
+            wanted.append((key, stamp))
+
+    def read(pair):
+        key, stamp = pair
+        try:
+            return key, stamp, jira_comments(key, cli)
+        except Exception:
+            return key, stamp, None
+
+    for key, stamp, found in _each(read, wanted):
+        if found is None:
+            continue
+        COMMENTS[key] = (stamp, found)
+        out[key] = found
+    return out
+
+
 def spec_issues(cli=None, config=None):
     """The proposals I wrote and labelled `spec` that nobody has taken: open and
     **unassigned**. An assignee means someone is already working on it, so it is
@@ -1807,6 +1923,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(live_sessions())
         elif path == "/specs":
             self.send_json(spec_issues())
+        elif path == "/comments":
+            asked = (parse_qs(self.path.split("?", 1)[-1]).get("keys") or [""])[0]
+            self.send_json(live_comments([k for k in asked.split(",") if k][:40]))
         elif path == "/status":
             self.send_json(status())
         elif path == "/attention-view.js":

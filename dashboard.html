@@ -130,6 +130,14 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .jira-type{color:#8b949e;margin-left:6px;font-size:11px}
 .jira-summary{color:#c9d1d9;margin-left:6px}
 .jira-line .badge{margin-left:6px;vertical-align:1px}
+.nextline{margin-top:6px;padding:6px 10px;border-left:3px solid #e3b341;border-radius:0 6px 6px 0;background:#e3b3410f;font-size:12.5px;color:#e6edf3}
+.nextline b{color:#e3b341;font-weight:700;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;margin-right:7px}
+/* the verb is the call: the reason it gives stays behind it. */
+.nextline .do{font-weight:600;color:#fff}
+.nextline .why{color:#8b949e}
+.nextline.quiet{border-left-color:#30363d;border-left-style:dashed;background:none;color:#6e7681;font-size:12px}
+.nextline.quiet b{color:#6e7681}
+.block .nextline{margin-top:8px}
 /* What holds a card up: the words are the signal, the key is the link. */
 .blocked .blocked-label{color:#e3b341;font-size:11px;margin-right:6px}
 .linked .link-label{color:#8b949e;font-size:11px;margin-right:6px}
@@ -398,10 +406,12 @@ function render(data){
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
+    'Next line — every card you can act on says what it is asking for, in one sentence, from the evidence the board already has: a merged PR the ticket still waits on, a ready PR nobody has merged, a ticket to deploy, an approval you owe — or a comment somebody left after your last look, which outranks the status because a person is waiting. It names that evidence on hover, and it never changes a tier or a count. Two things earn the line: a rule that asks you to do something (shown wherever the card sits), and — in Needs and Ready only — the absence of one, which says the answer is in something the board has not read. The comments are read live, one call per card, reused until the card moves.',
     'Parking — the picker on each card snoozes it until a time (4 hours / 1 day / 3 days / 1 week) or acknowledges it until the card changes. Both kinds leave the tiers and collect in the collapsed Parked fold, counted in the header line; expand it to wake one or unack it.'
   ]));
   paintSpecs();
   paintSessions();
+  paintComments();
   const jumped = document.getElementById('jumped');
   jumped.innerHTML = '';
   for(const r of view.changedRows()){
@@ -510,6 +520,56 @@ function sessionBox(repo, live){
 /* Every repository with a session open on it right now, one box each. Read live
    from herdr and bb at every look, so this rail is machine state and never part
    of the snapshot; a failed read costs the rail, never the queue. */
+/* One card's line, built from the evidence the board has: the row itself, plus
+   the comments the read landed. A rule that asks you to do something
+   shows wherever the card sits (a Waiting card can still owe an approval); a
+   rule that only says you are waiting shows nowhere — that is what the tier
+   already means. A card in Needs or Ready with nothing to say says so, because
+   there a silence is the signal: the answer is in something we have not read. */
+function nextLineEl(it){
+  const l = view.nextOf(it, { comment: comments[it.key] || [] });
+  const room = ['needs','ready'].indexOf(it.section || it.tier) !== -1;
+  if(!((l.next && l.next.act) || (!l.next && room))) return null;
+  const nl = el('div','nextline' + (l.next ? '' : ' quiet'));
+  nl.appendChild(el('b', null, 'next'));
+  if(l.next){
+    const parts = String(l.next.say).split(' \u2014 ');   // the verb, then the reason
+    nl.appendChild(el('span','do', parts[0]));
+    if(parts.length > 1) nl.appendChild(el('span','why', ' \u2014 ' + parts.slice(1).join(' \u2014 ')));
+    nl.title = l.next.why;
+  }else{
+    nl.appendChild(document.createTextNode('nothing from the board'
+      + (l.wanting.length ? ' \u2014 the answer would be in the comments' : '')));
+  }
+  return nl;
+}
+
+/* The comments are a read, not part of the snapshot: the board paints from the
+   file first and the lines settle when this lands. A read that fails costs the
+   comment on the line, never the queue. */
+const JIRA_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+let comments = {};
+async function paintComments(){
+  const rows = view.tiers.flatMap(t => t.rows).filter(r => r.key);
+  const keys = [...new Set(rows.map(r => r.key).filter(k => JIRA_KEY.test(k)))];
+  if(!keys.length) return;
+  try{
+    comments = await (await fetch('/comments?keys=' + keys.join(','))).json();
+  }catch(e){
+    return;
+  }
+  for(const it of rows){
+    if(!comments[it.key]) continue;
+    const host = document.querySelector('.row[data-key="' + CSS.escape(it.key) + '"]');
+    if(!host) continue;
+    const oldline = host.querySelector('.nextline');
+    const fresh = nextLineEl(it);
+    if(oldline) oldline.remove();
+    const meta = host.querySelector('.body > .meta');
+    if(fresh && meta) meta.after(fresh);
+  }
+}
+
 function paintSessions(){
   const repos = Object.entries(sessions || {}).filter(([, live]) => live.length);
   sessionsRail.innerHTML = '';
@@ -681,6 +741,10 @@ function card(it, kind){
   if(!gone) for(const f of (it.facts || [])) m.appendChild(el('span','fact '+(f.tone||'warn'), f.label));
   if(it.detail) m.appendChild(document.createTextNode(' · ' + it.detail));
   b.appendChild(m);
+  if(!gone){
+    const nl = nextLineEl(it);
+    if(nl) b.appendChild(nl);
+  }
   if(it.jira){
     const jr = el('div','jira-line');
     const j = document.createElement('a');

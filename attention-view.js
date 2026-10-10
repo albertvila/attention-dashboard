@@ -53,6 +53,147 @@
     return top[1] > 1 ? top[1] + ' \u00d7 ' + top[0] : '';
   }
 
+  /* ------------------------------------------------------------------------
+     The next line: what this card is asking for, and the evidence it stands on.
+
+     Everything a line can stand on is a *kind* of evidence. The free kinds come
+     off the row we already have; the rest is read per card and passed in as
+     `reads`, so a new source of truth (Jira comments, PR review threads, the
+     transitions the workflow allows) is a new kind plus rules that name it —
+     no rule rewritten, no card moved. Every sentence names its evidence, the
+     way everything else a surface shows does. */
+  const NEXT_KINDS = {
+    state: { label: 'the card state', free: true },
+    fact: { label: 'the source facts', free: true },
+    child: { label: 'the linked items on the card', free: true },
+    link: { label: 'the Jira links', free: true },
+    blocker: { label: 'what Jira says holds it up', free: true },
+    comment: { label: 'the Jira comments', free: false },
+    'review-comment': { label: 'the PR comments', free: false },
+    transition: { label: 'the transitions Jira allows', free: false },
+  };
+  const NEXT_CLOSED = ['merged', 'closed', 'done'];
+  const isOpen = e => NEXT_CLOSED.indexOf(String(e.state || e.category || '').toLowerCase()) === -1;
+
+  /** Row + whatever else was read -> the evidence, one item per thing we know. */
+  function evidenceOf(row, reads) {
+    const x = reads || {}, ev = [];
+    for (const s of row.states || []) ev.push({ kind: 'state', key: s.key, label: s.label, tier: s.tier, at: (row.times || {}).updated || '' });
+    for (const f of row.facts || []) ev.push({ kind: 'fact', label: f.label, tone: f.tone, at: '' });
+    for (const c of row.children || []) {
+      const st = (c.states || [])[0] || {};
+      ev.push({ kind: 'child', ref: c.ref, title: c.title, state: st.key || '', label: st.label || '', at: (c.times || {}).updated || '' });
+    }
+    for (const l of row.linked || []) ev.push({ kind: 'link', ref: l.key, status: l.status, category: l.status_category, type: l.type, at: '' });
+    for (const b of row.blocked_by || []) ev.push({ kind: 'blocker', ref: b.key, status: b.status, category: b.status_category, at: '' });
+    for (const c of x.comment || []) ev.push({ kind: 'comment', at: c.at, who: c.who, text: c.text });
+    for (const c of x['review-comment'] || []) ev.push({ kind: 'review-comment', at: c.at, who: c.who, text: c.text, ref: c.ref });
+    for (const t of x.transition || []) ev.push({ kind: 'transition', name: t, at: '' });
+    return ev;
+  }
+
+  /** The card as the rules read it. */
+  function nextShape(row, ev) {
+    const state = (row.states || [])[0] || {}, facts = (row.facts || []).map(f => f.label);
+    const kids = ev.filter(e => e.kind === 'child'), links = ev.filter(e => e.kind === 'link');
+    return {
+      ref: row.ref, state, facts, kids, links,
+      blockers: ev.filter(e => e.kind === 'blocker'),
+      openKids: kids.filter(isOpen), mergedKids: kids.filter(k => !isOpen(k)),
+      openLinks: links.filter(l => isOpen(l)),
+      openBlockers: ev.filter(e => e.kind === 'blocker' && e.category !== 'Done'),
+      humans: ev.filter(e => e.kind === 'comment' || e.kind === 'review-comment')
+        .sort((a, b) => (a.at < b.at ? -1 : 1)),
+      transitions: ev.filter(e => e.kind === 'transition').map(e => e.name),
+    };
+  }
+
+  /* In order: first one that fires wins. Each says what to do and which evidence
+     the sentence stands on. */
+  const NEXT_RULES = [
+    { id: 'open-link', act: false, needs: 'link',
+      when: c => {
+        const l = c.openLinks[0];
+        if (!l || ['with-support', 'in-progress'].indexOf(c.state.key) === -1) return null;
+        return { say: 'wait for ' + l.ref + ' (' + l.status + ')', why: l.ref + ' is ' + l.status + ', linked to this card' };
+      } },
+    { id: 'held-up', act: false, needs: 'blocker',
+      when: c => {
+        const b = c.openBlockers[0];
+        if (!b) return null;
+        return { say: 'held by ' + b.ref + ' until it is done', why: 'Jira says this is blocked by ' + b.ref + ', still ' + b.status };
+      } },
+    { id: 'answer-a-human', act: true, needs: 'comment',
+      when: (c, ctx) => {
+        const h = c.humans.slice(-1)[0];
+        if (!h || !(ctx.lastLook && h.at > ctx.lastLook)) return null;
+        return { say: 'answer ' + h.who + ' — they wrote after your last look', why: h.who + ' commented, nothing has moved since' };
+      } },
+    { id: 'merge-a-ready-pr', act: true, needs: 'child',
+      when: c => {
+        const r = c.kids.filter(k => k.state === 'ready')[0];
+        if (!r) return null;
+        return { say: 'merge ' + r.ref + ' — approved and green, nothing blocks it', why: r.ref + ' is ready: approved, with its checks green' };
+      } },
+    { id: 'merged-member', act: true, needs: 'child',
+      when: c => {
+        const m = c.mergedKids.slice(-1)[0];
+        if (!m || c.state.key === 'merged') return null;
+        if (c.state.key === 'to-deploy') return { say: 'ship it — the work is already merged, the ticket just waits for the deploy'
+          + (c.transitions.length ? ' (' + c.transitions.slice(0, 2).join(', ') + ')' : ''),
+          why: m.ref + ' is merged and the ticket reads To Deploy' };
+        if (c.facts.indexOf('Ready to Test') !== -1) return { say: 'verify in staging, then close it — ' + m.ref + ' is merged', why: m.ref + ' merged and the ticket sits at Ready to Test' };
+        return { say: 'close the ticket, or move it on — ' + m.ref + ' is merged', why: m.ref + ' (' + m.label + ') merged and the ticket still reads ' + c.state.label };
+      } },
+    { id: 'to-deploy', act: true, needs: 'state',
+      when: c => c.state.key !== 'to-deploy' ? null
+        : { say: 'move it to the deploy status' + (c.transitions.length ? ' — Jira offers ' + c.transitions.slice(0, 2).join(', ') : ''), why: 'the ticket is To Deploy' } },
+    { id: 'verify', act: true, needs: 'fact',
+      when: c => c.facts.indexOf('Ready to Test') === -1 ? null
+        : { say: 'verify it in staging, then close the ticket', why: 'the Jira status is Ready to Test' } },
+    { id: 'green-but-blocked', act: true, needs: 'fact',
+      when: c => (c.facts.indexOf('merge blocked') === -1 || c.facts.indexOf('checks green') === -1) ? null
+        : { say: 'you need an approval — checks are green and nothing else blocks it', why: 'the facts read checks green and merge blocked, which is a review' } },
+    { id: 'answer-a-thread', act: true, needs: 'state',
+      when: c => {
+        const want = c.kids.concat([{ ref: c.ref, state: c.state.key, label: c.state.label }])
+          .filter(k => ['needs-comments', 'needs-reply'].indexOf(k.state) !== -1)[0];
+        if (!want) return null;
+        return { say: 'answer the comments on ' + want.ref, why: want.ref + ' is ' + want.label };
+      } },
+    { id: 'on-them', act: false, needs: 'state',
+      when: c => ['waiting-reply', 'waiting'].indexOf(c.state.key) === -1 ? null
+        : { say: 'nothing to do — it is on them', why: 'the card reads ' + c.state.label } },
+    { id: 'with-support', act: false, needs: 'state',
+      when: c => c.state.key !== 'with-support' ? null
+        : { say: 'with support — nothing for you until they answer', why: 'the Jira status is Support Investigating' } },
+    { id: 'all-in', act: false, needs: 'child',
+      when: c => (!c.kids.length || c.openKids.length) ? null
+        : { say: 'nothing left to do on this card', why: 'every linked item is merged or closed' } },
+    { id: 'jira-offers', act: true, needs: 'transition',
+      when: c => !c.transitions.length ? null
+        : { say: 'Jira offers: ' + c.transitions.join(', '), why: 'the transitions available from ' + c.state.label } },
+  ];
+
+  /** The line for one card, plus what it would take to have one. `reads` carries
+      the evidence a per-card read added; nothing else here touches the network. */
+  function nextOf(row, reads, ctx) {
+    const ev = evidenceOf(row, reads);
+    const c = nextShape(row, ev);
+    const options = ctx || {};
+    let next = null, rule = null;
+    for (const r of NEXT_RULES) {
+      const hit = r.when(c, options);
+      if (hit) { next = { say: hit.say, why: hit.why, act: r.act !== false }; rule = r; break; }
+    }
+    return {
+      next, rule,
+      /** Rules that stand on kinds nobody has read — the price of not reading. */
+      wanting: next ? [] : NEXT_RULES.filter(r => !NEXT_KINDS[r.needs].free && !(reads || {})[r.needs])
+        .map(r => ({ id: r.id, needs: r.needs })),
+    };
+  }
+
   /** The Waiting tier as groups: every row says which group it landed in, the
       rows keep the tier's own order, and groups keep the order their key first
       appears in. A lone card is a group of one. */
@@ -205,6 +346,10 @@
 
     return {
       snoozeOf, ackOf, parked, specs,
+      /** The line one card asks for, from the evidence the board already has.
+          `reads` carries whatever a per-card read added; nothing here reads. */
+      nextOf: (row, reads, ctx) => nextOf(row, reads,
+        { lastLook: (ctx || {}).lastLook !== undefined ? ctx.lastLook : seenAt }),
       flag: row => flagOf(row, since),
       closed: isClosed,
       tiers, folds, notes, nextCard, counts, summaryText, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
