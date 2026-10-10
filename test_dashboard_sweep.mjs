@@ -18,9 +18,9 @@ const page = (() => {
 })();
 
 const NOW = Date.parse('2026-10-07T12:00:00Z');
-const snapshot = at => ({
+const snapshot = (at, tiers = []) => ({
   schema: 1, producer: { code: 'k', version: 1 }, generatedAt: at,
-  tiers: [], drafts: [], closed: [], errors: [], hidden_bots: 0,
+  tiers, drafts: [], closed: [], errors: [], hidden_bots: 0,
   changes: { previousAt: null, summary: {}, items: {}, gone: [] },
 });
 
@@ -54,7 +54,7 @@ function mount(opts = {}) {
       if (opts.railsSilent && (String(url).startsWith('/specs') || String(url).startsWith('/sessions'))) {
         return new Promise(() => {});
       }
-      return { json: async () => snapshot(new Date(now).toISOString()) };
+      return { json: async () => snapshot(new Date(now).toISOString(), opts.tiers) };
     },
     localStorage: { getItem: () => stamped.at(-1) ?? null, setItem: (k, v) => stamped.push(v) },
     setInterval: (fn, ms) => { interval = { fn, ms }; },
@@ -131,5 +131,30 @@ const queries = html.slice(html.indexOf('@media'), html.indexOf('#app{min-width:
 assert.ok(/@media \(max-width:1000px\)\{[\s\S]*?#specs\{order:-1/.test(queries),
   'the stacked layout reads specs first');
 assert.ok(!/#specs\{order:[1-9]/.test(queries), 'no width drops specs below the board');
+
+/* What a card is waiting on, named on the card itself: `blocked by` what Jira
+   says holds it up, `linked` the ticket it merely links to — the one you raised
+   with another team. Every part of both lines comes off the row. */
+const linkCard = {
+  chip: 'JIRA', key: 'FIRE-77999', ref: 'FIRE-77999', title: 'high findings disclosed', url: 'u',
+  container: '', states: [{ key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' }],
+  facts: [], labels: [], children: [], section: 'waiting', tier: 'waiting', times: {},
+  blocked_by: [{ key: 'FIDI-275', url: 'u2', status: 'In Progress', status_category: 'In Progress',
+                 type: 'Bug', summary: 'soda checks fail' }],
+  linked: [{ key: 'FISRE-27667', url: 'u3', status: 'In Progress', status_category: 'In Progress',
+             type: 'Service Request', summary: 'rotate the leaked secrets' }],
+};
+const L = mount({ railsSilent: true, tiers: [
+  { key: 'needs', title: 'Needs you now', items: [] },
+  { key: 'ready', title: 'Ready when you are', items: [] },
+  { key: 'waiting', title: 'Waiting on others', items: [linkCard] }] });
+await tick();
+assert.deepEqual(L.textsOf('blocked-label'), ['blocked by ']);
+assert.deepEqual(L.textsOf('linked-label'), ['linked ']);
+assert.ok(L.textsOf('jira').includes('FIDI-275'), 'the blocker is named by key');
+assert.ok(L.textsOf('jira').includes('FISRE-27667'), 'so is the ticket you are waiting on');
+assert.ok(L.textsOf('jira-summary').includes('rotate the leaked secrets'));
+assert.equal(L.created.filter(c => String(c.cls) === 'badge wip' && c.text === 'In Progress').length, 2,
+  'each line carries its own status badge');
 
 console.log('dashboard sweep: all checks passed');

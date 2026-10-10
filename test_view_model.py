@@ -322,6 +322,63 @@ class JiraSource(unittest.TestCase):
                                              "status": {}, "issueType": {}}])[0]
         self.assertEqual(plain["blocked_by"], [])
 
+    def test_a_jira_link_is_named_with_the_other_tickets_own_status(self):
+        """The ticket you raised with another team and are waiting on is named on
+        the card: key, its type, status and summary, all of it carried by the
+        link. A blocking link is not here — that one is blocked_by — and the open
+        tickets come first, because that one is the wait."""
+        relates = {"name": "Relates", "inward": "relates to", "outward": "relates to"}
+        blocks = {"name": "Blocking Issue", "inward": "is blocked by", "outward": "blocks"}
+        rows = [{"key": "FIRE-77999", "summary": "high findings disclosed",
+                 "status": {"name": "Support Investigating", "statusCategory": {"name": "In Progress"}},
+                 "issueType": {"name": "Data"},
+                 "issuelinks": [
+                     {"type": relates, "inwardIssue": {"key": "RBT-433", "fields": {
+                         "summary": "the discarded work ticket", "issuetype": {"name": "Bug"},
+                         "status": {"name": "Discard", "statusCategory": {"name": "Done"}}}}},
+                     {"type": relates, "outwardIssue": {"key": "FISRE-27667", "fields": {
+                         "summary": "rotate the leaked secrets", "issuetype": {"name": "Service Request"},
+                         "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}}}}},
+                     {"type": blocks, "inwardIssue": {"key": "FIDI-1", "fields": {}}},
+                 ]}]
+        item = attention.items_from_jira(rows)[0]
+        self.assertEqual(item["linked"], [
+            {"key": "FISRE-27667", "url": attention.JIRA_BASE + "FISRE-27667",
+             "status": "In Progress", "status_category": "In Progress", "type": "Service Request",
+             "summary": "rotate the leaked secrets"},
+            {"key": "RBT-433", "url": attention.JIRA_BASE + "RBT-433",
+             "status": "Discard", "status_category": "Done", "type": "Bug",
+             "summary": "the discarded work ticket"}])
+        self.assertEqual([b["key"] for b in item["blocked_by"]], ["FIDI-1"])
+        # it rides to the row the surface renders
+        row = find(attention.build_view([item], now=NOW), "FIRE-77999")
+        self.assertEqual([l["key"] for l in row["linked"]], ["FISRE-27667", "RBT-433"])
+        # and a card nobody links to says so with an empty list, never a missing key
+        plain = attention.items_from_jira([{"key": "RBT-2", "summary": "free",
+                                             "status": {}, "issueType": {}}])[0]
+        self.assertEqual(plain["linked"], [])
+
+    def test_a_link_the_card_already_carries_is_not_named_twice(self):
+        """The ticket a Jira link joins to this one is already on the card — as a
+        child, or inline when it names the header — so the linked line does not
+        name it again."""
+        links = {"name": "Problem/Incident", "inward": "is caused by", "outward": "causes"}
+        rows = [
+            {"key": "RBT-9004", "summary": "the work",
+             "status": {"name": "Ready to Test", "statusCategory": {"name": "In Progress"}},
+             "issueType": {"name": "Bug"},
+             "issuelinks": [{"type": links, "outwardIssue": {"key": "FIRE-97142", "fields": {
+                 "summary": "the alert", "issuetype": {"name": "Bug"},
+                 "status": {"name": "To Do", "statusCategory": {"name": "To Do"}}}}}]},
+            {"key": "FIRE-97142", "summary": "the alert",
+             "status": {"name": "To Do", "statusCategory": {"name": "To Do"}},
+             "issueType": {"name": "Bug"},
+             "issuelinks": [{"type": links, "inwardIssue": {"key": "RBT-9004", "fields": {}}}]},
+        ]
+        card = find(attention.build_view(attention.items_from_jira(rows), now=NOW), "RBT-9004")
+        self.assertEqual([c["ref"] for c in card["children"]], ["FIRE-97142"])
+        self.assertEqual(card["linked"], [])
+
     def test_a_blocking_link_is_a_dependency_not_a_cluster_link(self):
         """A blocker stays its own card — it rides in blocked_by — so a blocking
         link never clusters the two tickets, in either direction."""
@@ -419,7 +476,7 @@ class JiraSource(unittest.TestCase):
         row = find(view, "FIRE-1")
         self.assertEqual(row["states"][0]["tier"], "waiting")
         self.assertEqual(row["states"][0]["label"], "with support")
-        # no new section: the snapshot keeps it in waiting, the reader folds it out
+        # no new section: it rides the waiting tier like any other waiting card
         snapshot = attention.payload(view, now=NOW)
         self.assertEqual(snapshot["tiers"][2]["items"][0]["section"], "waiting")
 

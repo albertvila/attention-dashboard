@@ -144,6 +144,7 @@ Every row carries:
 key           stable identity across snapshots (acme/web-frontend#2040, FIRE-9001)
 links         the keys that clustered this card with others; empty = standalone
 blocked_by    [{key, url, status, status_category, type, summary}] — what Jira says holds this card up; [] when nothing does
+linked        [{key, url, status, status_category, type, summary}] — the Jira links that are not dependencies, open first; [] when there are none
 chip          REVIEW | MY PR | ISSUE | JIRA | REVIEWED
 title, ref, url, author, container, labels, detail, age
 jira          ticket URL when the branch/item names one; jira_issue = {type,status,status_category,summary}
@@ -184,12 +185,10 @@ blocker stays its own card and rides in `blocked_by`.
 
 ## With support (Jira)
 
-A Jira ticket in `Support Investigating` has state `with-support`: it stays in the
-snapshot's **waiting** tier and renders in a collapsed **With support fold**
-rather than the Waiting queue, so a ticket parked with support does not inflate
-the rendered Waiting count. The fold summary names the oldest age. A ticket that
-has not started stays in Needs, and `Waiting for Customer` stays `in-progress` —
-the support status is the only one that folds.
+A Jira ticket in `Support Investigating` has state `with-support`: it rides
+**Waiting on others** like any other waiting work, labelled `with support` with
+the Jira status as its fact. A ticket that has not started stays in Needs, and
+`Waiting for Customer` stays `in-progress`.
 
 ## Blocked by (Jira)
 
@@ -200,6 +199,14 @@ readable without opening Jira, and a blocker that has gone Done reads green
 instead of amber. Jira hands all of it back with the link itself, so naming a
 blocker costs no second call. The other direction (this card *blocks* another)
 is not a block on this card and is not shown.
+
+Every other Jira link is named the same way, in `linked`: the ticket you raised
+with another team and are waiting on, a ticket of your own the incident also
+touches, the work ticket an alert points at. One line each — key, its type, its
+status and its summary — open tickets first, because the open one is the wait.
+A link to a ticket the card already carries (a linked child, or the ticket the
+header shows inline) is not named again: the same key on the same card twice is
+noise.
 
 ## Ongoing work and specs (read beside the snapshot)
 
@@ -294,8 +301,8 @@ one of the references above.
 ## Consumer rules: one implementation
 
 `attention-view.js` is the only place the *reader-side* rules live — change
-flags, ghosts (hidden in Needs, never for support), the With support and Parked
-folds, the fold summaries (oldest age,
+flags, ghosts (hidden in Needs), the Parked and Drafts folds, the fold summaries
+(oldest age,
 conflicted drafts, the parked kinds — built from the ages already on the rows,
 never a second calculation), the next-card line an empty Needs tier shows (the
 first Ready card, or nothing when Ready is empty too), and where a card renders.
@@ -371,11 +378,10 @@ from `attention-view.js`.
   author, repository or key, facts, detail — starts at the same edge in every
   card, with age, links and parking at the row's right. Waiting does not
   collapse rows that share a title.
-- **With support**, **Parked**, **Drafts** and **Recently
-  closed** are collapsed folds, each showing its count and the description the
-  rules give it (`oldest 3d`, `snoozed until a time, or until the
-  card changes`, …). A fold the rules have nothing to say about shows its count
-  only.
+- **Parked**, **Drafts** and **Recently closed** are collapsed folds, each
+  showing its count and the description the rules give it (`oldest 3d`,
+  `snoozed until a time, or until the card changes`, …). A fold the rules have
+  nothing to say about shows its count only.
 - A card with linked items carries `N linked` at the row's right, beside age and
   parking, expanding them in place; a card with no links carries no count. Each
   child keeps its own chip, ref, states, facts, labels, detail and age — one

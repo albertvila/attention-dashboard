@@ -3,10 +3,9 @@
    get a runnable check of their own:  node test_attention_view.mjs
 
    Covers what used to be copied per surface: change flags, the closed/new rule,
-   ghosts (hidden in Needs, never for support), the With support fold, the one
-   Parked fold both kinds of parking land in, an ack that only
-   holds while the card has not moved, the Waiting tier's groups, the fold
-   summaries, and the next-card line. */
+   ghosts (hidden in Needs), the one Parked fold both kinds of parking land in,
+   an ack that only holds while the card has not moved, the Waiting tier's
+   groups, the fold summaries, and the next-card line. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -87,9 +86,9 @@ const ghostSupport = row({ key: 'G3', section: 'waiting', goneAt: '2026-10-02T11
 view = overlay(data({ changes: { previousAt: '2026-10-02T11:00:00.000Z', summary: {}, items: {}, gone: [ghost, ghostWaiting, ghostSupport] } }),
                { now: NOW });
 assert.deepEqual(view.tiers[0].rows.map(r => r.key), []);          // needs: hidden
-assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1', 'G2']);  // waiting keeps its ghost, not the folded one
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1', 'G2', 'G3']);  // waiting keeps its ghosts, support included
 assert.equal(view.tiers[2].rows[1].change.kind, 'gone');
-assert.equal(view.counts().gone, 3);                                // but the header still counts all three
+assert.equal(view.counts().gone, 3);                                // and the header counts all three
 
 // a parent that went while its child stayed live: the live card already names
 // the parent, so the struck copy does not render — but it still counts
@@ -106,20 +105,17 @@ assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['K1', 'G5']);  // G5 still
 assert.equal(view.counts().gone, 2);
 
 // --- a fold and parking -----------------------------------------------------
-const folded = row({ key: 'FIRE-9', section: 'needs',
-                     states: [{ key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' }] });
-view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [folded] }, { key: 'ready', title: 'r', items: [] },
-                              { key: 'waiting', title: 'w', items: [row()] }] }), { now: NOW });
-assert.deepEqual(view.tiers[0].rows, []);                        // a folded card never sits in a tier
-assert.deepEqual(view.folds.support.map(r => r.key), ['FIRE-9']);
+const parkedRow = row({ key: 'FIRE-9' });
+const parkData = { tiers: [{ key: 'needs', title: 'n', items: [parkedRow] }, { key: 'ready', title: 'r', items: [] },
+                           { key: 'waiting', title: 'w', items: [row()] }] };
+view = overlay(data(parkData), { now: NOW });
+assert.deepEqual(view.tiers[0].rows.map(r => r.key), ['FIRE-9']);  // unparked, it sits in its own tier
 assert.deepEqual(view.folds.parked, []);
 assert.equal('snoozed' in view.folds || 'acked' in view.folds, false);   // one fold, not two
 
-view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [folded] }, { key: 'ready', title: 'r', items: [] },
-                              { key: 'waiting', title: 'w', items: [row()] }] }),
+view = overlay(data(parkData),
                { snoozes: { 'FIRE-9': '2026-10-03T12:00:00.000Z', 'FIRE-1': '2026-10-03T12:00:00.000Z' }, now: NOW });
 assert.deepEqual(view.folds.parked.map(r => r.key).sort(), ['FIRE-1', 'FIRE-9']);
-assert.deepEqual(view.folds.support, []);                        // parking beats the fold it would have been in
 assert.equal(view.tiers[2].count, 0);
 assert.equal(view.formatWhen('2026-10-03T12:00:00.000Z').startsWith('until '), true);
 // an expired snooze is not a snooze
@@ -190,6 +186,8 @@ assert.equal(view.counts().new, 1);
 assert.equal(view.counts().changed, 1);
 
 // --- With support: a Jira card in Support Investigating ---------------------
+// It is a waiting card like any other: it rides Waiting on others, counted and
+// marked, with nothing folding it out.
 const SUPPORT = { key: 'with-support', label: 'with support', tier: 'waiting', tone: 'quiet' };
 const sup = (over = {}) => row({ key: 'SUP-1', ref: 'SUP-1', age: '1d', states: [SUPPORT],
   times: { updated: '2026-10-01T12:00:00.000Z' }, ...over });
@@ -198,39 +196,33 @@ const supData = (items) => data({ tiers: [{ key: 'needs', title: 'n', items: [] 
                                            { key: 'waiting', title: 'w', items }] });
 
 view = overlay(supData([sup(), row()]), { now: NOW });
-assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1']);    // out of the queue
-assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // in its own fold
-assert.equal(view.tiers[2].count, 1);                                // the count is the queue, not the fold
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['SUP-1', 'FIRE-1']);   // in the queue, where it was
+assert.equal(view.tiers[2].count, 2);                                // and counted in it
 
 // the header's state decides, children included — membership is by card, not member
 view = overlay(supData([sup({ children: [row({ key: 'C1', states: [{ key: 'needs-reply', label: 'needs reply', tier: 'needs', tone: 'warn' }] })] })]), { now: NOW });
-assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);
-assert.deepEqual(view.folds.support[0].children.map(r => r.key), ['C1']);
-assert.deepEqual(view.tiers[2].rows, []);
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['SUP-1']);
+assert.deepEqual(view.tiers[2].rows[0].children.map(r => r.key), ['C1']);
 // a more urgent header stays in its own tier, its support child along for the ride
 view = overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [row({ key: 'N1', children: [sup()] })] },
                                { key: 'ready', title: 'r', items: [] }, { key: 'waiting', title: 'w', items: [] }] }), { now: NOW });
 assert.deepEqual(view.tiers[0].rows.map(r => r.key), ['N1']);
-assert.deepEqual(view.folds.support, []);
 
-// parking beats the support fold, and coming back lands in the fold, not the queue
+// parking still beats it, and coming back lands in the queue
 view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-03T12:00:00.000Z' }, now: NOW });
 assert.deepEqual(view.folds.parked.map(r => r.key), ['SUP-1']);
-assert.deepEqual(view.folds.support, []);
 assert.equal(view.tiers[2].count, 0);
 view = overlay(supData([sup()]), { snoozes: { 'SUP-1': '2026-10-01T00:00:00.000Z' }, now: NOW });
-assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // expired: back in the fold
-assert.deepEqual(view.tiers[2].rows, []);
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['SUP-1']);     // expired: back in the queue
 view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-10-02T11:00:00.000Z' }, now: NOW });
 assert.deepEqual(view.folds.parked.map(r => r.key), ['SUP-1']);
-assert.deepEqual(view.folds.support, []);
 view = overlay(supData([sup()]), { acks: { 'SUP-1': '2026-09-30T00:00:00.000Z' }, now: NOW });
-assert.deepEqual(view.folds.support.map(r => r.key), ['SUP-1']);     // released: still not the queue
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['SUP-1']);     // released: still in the queue
 
-// a vanished one does not ghost back into the queue; the header still counts the drop
+// a vanished one ghosts back into the queue like any other waiting card
 const supGhost = sup({ goneAt: '2026-10-02T11:30:00.000Z', change: { kind: 'gone' } });
 view = overlay({ ...supData([row()]), changes: { previousAt: '2026-10-02T11:00:00.000Z', summary: {}, items: {}, gone: [supGhost] } }, { now: NOW });
-assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1']);
+assert.deepEqual(view.tiers[2].rows.map(r => r.key), ['FIRE-1', 'SUP-1']);
 assert.equal(view.counts().gone, 1);
 // a new one still counts as new
 assert.equal(overlay(supData([sup({ firstSeenAt: '2026-10-02T11:30:00.000Z' })]), { now: NOW }).counts().new, 1);
@@ -341,19 +333,9 @@ assert.deepEqual(view.specs, []);
 assert.equal(view.tiers[2].rows.some(r => 'sessions' in r), false);
 
 // --- fold summaries: what a collapsed fold is hiding ------------------------
-view = overlay(supData([sup({ age: '5d', times: { updated: '2026-09-27T12:00:00.000Z' } }),
-                        sup({ key: 'SUP-2', ref: 'SUP-2', age: '2d', times: { updated: '2026-09-30T12:00:00.000Z' } })]),
-               { now: NOW });
-assert.equal(view.notes.support(), 'oldest 5d');                   // the oldest row's own age
-view = overlay(supData([sup()]), { now: NOW });
-assert.equal(view.notes.support(), 'oldest 1d');
 view = overlay(data(), { now: NOW });
 assert.equal(view.notes.drafts(), '');                             // nothing hidden, nothing to say
-assert.equal(view.notes.support(), '');
 assert.equal(view.notes.parked(), '');                             // nothing parked, nothing to say
-// a fold with no updated time on its rows has no oldest clause to give
-view = overlay(supData([sup({ age: '', times: {} })]), { now: NOW });
-assert.equal(view.notes.support(), '');
 // a conflicted draft says so; a draft without conflicts is just old
 view = overlay(data({ drafts: [row({ key: 'D1', draft: true, age: '4d',
   times: { updated: '2026-09-28T12:00:00.000Z' },
@@ -364,10 +346,8 @@ assert.deepEqual(view.tiers[0].rows, []);
 view = overlay(data({ drafts: [row({ key: 'D1', draft: true, age: '4d',
   times: { updated: '2026-09-28T12:00:00.000Z' } })] }), { now: NOW });
 assert.equal(view.notes.drafts(), 'oldest 4d');
+// no updated time on the rows, no oldest clause to give
 assert.equal(overlay(data({ drafts: [row({ key: 'D1', draft: true })] }), { now: NOW }).notes.drafts(), '');
-// support names the oldest age of the rows it is hiding
-view = overlay(supData([sup(), sup({ key: 'SUP-2', age: '1h', times: { updated: '2026-10-02T11:00:00.000Z' } })]), { now: NOW });
-assert.equal(view.notes.support(), 'oldest 1d');
 
 // --- the next-card line -----------------------------------------------------
 const readyRow = (over = {}) => row({ key: 'o/r#7', ref: 'o/r#7', title: 'a ready PR',
@@ -384,7 +364,10 @@ assert.equal(overlay(lineData([], []), { now: NOW }).nextCard(), 'Nothing needs 
 // never a waiting row, never a fold: only Ready is work you can pick up
 assert.equal(overlay(lineData([], []), { now: NOW }).nextCard().includes('FIRE-1'), false);
 assert.equal(overlay(supData([sup()]), { now: NOW }).nextCard(), 'Nothing needs you.');
-assert.equal(overlay(lineData([sup()], []), { now: NOW }).nextCard(), 'Nothing needs you.');
+assert.equal(overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] },
+                                    { key: 'ready', title: 'r', items: [readyRow()] },
+                                    { key: 'waiting', title: 'w', items: [sup()] }] }), { now: NOW }).nextCard(),
+  'Nothing needs you. Next: o/r#7 · ready');   // a support card waits: it is never the next pick-up
 
 // --- stale-code witness -----------------------------------------------------
 assert.deepEqual(globalThis.AttentionView.stale({ producer: { code: 'aaa' } }, { producer: { code: 'aaa' } }),

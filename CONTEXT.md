@@ -61,13 +61,12 @@ _Avoid_: badge (that is a state's pill, not its source)
 
 **Fold**:
 A collapsed home for cards that belong to neither a tier nor the closed log:
-support, drafts, snoozed, acknowledged.
+drafts, snoozed, acknowledged.
 
 **With support**:
-The state for a Jira ticket in `Support Investigating`, and the fold it renders
-in. The snapshot keeps the card in the waiting tier; the fold is a
-rendering home, not a section.
-_Avoid_: support section, support tier
+The state for a Jira ticket in `Support Investigating`. It rides the waiting
+tier with every other ticket someone else holds.
+_Avoid_: support section, support fold
 
 ### The snapshot
 

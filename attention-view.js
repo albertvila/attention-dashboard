@@ -82,9 +82,6 @@
     const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || []);
     const gone = (data.changes || {}).gone || [];
 
-    // A Jira card in Support Investigating is waiting in the snapshot, and
-    // folds out of the rendered queue at read time — its own fold, not a tier.
-    const isSupport = row => (((row.states || [])[0] || {}).key) === 'with-support';
     const snoozeOf = row => (snoozes[row.key] && snoozes[row.key] > now) ? snoozes[row.key] : null;
     // An ack holds only while the card has not moved since you acknowledged it.
     const ackOf = row => {
@@ -92,9 +89,8 @@
       return (at && (!row.lastChangedAt || row.lastChangedAt <= at)) ? at : null;
     };
     const parked = row => !!(snoozeOf(row) || ackOf(row));
-    /** Renders in a tier: work that is neither support (its own fold) nor
-        parked. */
-    const work = row => !isSupport(row) && !parked(row);
+    /** Renders in a tier: work nobody has parked. */
+    const work = row => !parked(row);
 
     // Every key a surface draws live, children included: a parent that vanished
     // while its children survived is the same work twice.
@@ -108,7 +104,7 @@
       // child is still live duplicates them: the live card already names what
       // the parent was, so striking it again is noise.
       if (section === 'needs') return [];
-      return gone.filter(r => r.section === section && !isSupport(r)
+      return gone.filter(r => r.section === section
         && !parked(r) && since && r.goneAt > since && !allKidsLive(r));
     }
 
@@ -131,7 +127,6 @@
       .concat(rows.filter(r => ackOf(r) && !snoozeOf(r)));
     const folds = {
       parked: parkedRows,
-      support: rows.filter(r => isSupport(r) && !parked(r)),
       drafts: (data.drafts || []).filter(work).concat(ghosts('drafts')),
       closed: (data.closed || []).filter(work).concat(ghosts('closed')),
     };
@@ -154,7 +149,6 @@
       drafts: () => [folds.drafts.some(r => (r.states || []).some(s => s.key === 'conflicts')) ? 'conflicts' : '',
         oldestClause(folds.drafts)
       ].filter(Boolean).join(' · '),
-      support: () => oldestClause(folds.support),
       // What the one fold hides: two kinds of parking, and how each wakes.
       parked: () => folds.parked.length ? 'snoozed until a time, or until the card changes' : '',
     };
@@ -198,7 +192,7 @@
         be a jump to nowhere. */
     function changedRows() {
       const all = tiers.flatMap(t => t.rows)
-        .concat(folds.support, folds.parked, folds.drafts, folds.closed);
+        .concat(folds.parked, folds.drafts, folds.closed);
       return all.filter(r => { const f = flagOf(r, since); return f && f.kind === 'moved'; });
     }
 

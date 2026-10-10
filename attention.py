@@ -74,7 +74,7 @@ def _state(key):
 SCHEMA_VERSION = 1
 # Bumped by hand for human-meaningful changes; the code hash below is the
 # automatic "which build wrote this file" witness a stale process is caught by.
-PRODUCER_VERSION = 3
+PRODUCER_VERSION = 4
 _PRODUCER_CODE = None
 
 
@@ -112,8 +112,7 @@ JIRA_BASE = "https://launchmetrics.atlassian.net/browse/"
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+")
 # Done-category statuses that still need you (deploy work that isn't finished).
 DEPLOY_STATUSES = ("TO_DEPLOY",)
-# Waiting on a support engineer: still waiting on others, but folded out of the
-# rendered tier at read time so it does not swell the queue.
+# Waiting on a support engineer: still waiting on others.
 SUPPORT_STATUS = "Support Investigating"
 JIRA_JQL = ("assignee = currentUser() AND (statusCategory != Done OR "
             + " OR ".join(f'status = "{s}"' for s in DEPLOY_STATUSES)
@@ -197,6 +196,10 @@ def build_view(items, hidden_bots=0, errors=None, now=None, closed=None):
         # the header's own Jira ticket is already shown inline; don't repeat it.
         jira_key = rows[0]["jira"].rsplit("/", 1)[-1] if rows[0]["jira"] else ""
         kids = [r for r in rows[1:] if r["ref"] != jira_key]
+        # A link to a ticket this card already carries — a child, or the ticket it
+        # names inline — is not a line of its own: the key would render twice.
+        carried = {r["ref"] for r in rows} | {jira_key}
+        rows[0]["linked"] = [l for l in rows[0].get("linked") or [] if l["key"] not in carried]
         rows[0]["children"] = [{k: r[k] for k in CHILD_FIELDS} for r in kids]
         if all(id(item) in closed_ids for item in group):
             # The lane shows the last day, however long closed work is collected
@@ -244,6 +247,7 @@ def _row(item, now):
         "jira": item.get("jira", ""),
         "links": item.get("links") or [],   # what clustered this card; empty = on its own
         "blocked_by": item.get("blocked_by") or [],   # what holds it up, in its own line
+        "linked": item.get("linked") or [],   # Jira links that are not dependencies, named
         "jira_issue": item.get("jira_issue"),
         "container": item.get("container", ""),
         "labels": item.get("labels") or [],
@@ -514,7 +518,7 @@ def payload(view, previous=None, now=None):
 # --- adapters: recorded gh JSON -> normalized items -------------------------
 
 def _item(chip, *, source="github", key="", container="", ref="", title="", url="", author="",
-          jira="", links=None, blocked_by=(), states=(), detail="", facts=(), labels=(), times=None,
+          jira="", links=None, blocked_by=(), linked=(), states=(), detail="", facts=(), labels=(), times=None,
           draft=False):
     """The one item shape every adapter emits, and only what its source has.
     Tier, label and tone come later from `states` — never here."""
@@ -529,6 +533,7 @@ def _item(chip, *, source="github", key="", container="", ref="", title="", url=
         "jira": jira,
         "links": list(links or []),
         "blocked_by": list(blocked_by or []),
+        "linked": list(linked or []),
         "states": list(states),
         "detail": detail,
         "facts": list(facts or []),
@@ -729,6 +734,39 @@ def _jira_blockers(row):
     return out
 
 
+def _jira_links(row):
+    """The other side of every Jira link that is not a dependency, named the way
+    a blocker is: key, its own type, status and summary, all of it handed back
+    with the link itself. A blocking link is not here — it is `blocked_by`."""
+    out = []
+    seen = set()
+    for link in row.get("issuelinks") or []:
+        kind = link.get("type") or {}
+        if "block" in (kind.get("inward") or "").lower() \
+                or "block" in (kind.get("outward") or "").lower():
+            continue
+        for side in ("inwardIssue", "outwardIssue"):
+            issue = link.get(side) or {}
+            key = issue.get("key")
+            # two link types to the same ticket is still one line on the card.
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            fields = issue.get("fields") or {}
+            status = fields.get("status") or {}
+            out.append({
+                "key": key,
+                "url": JIRA_BASE + key,
+                "status": status.get("name", ""),
+                "status_category": (status.get("statusCategory") or {}).get("name", ""),
+                "type": (fields.get("issuetype") or {}).get("name", ""),
+                "summary": fields.get("summary", ""),
+            })
+    # still open first: that one is the wait, a finished one is history.
+    out.sort(key=lambda l: l["status_category"] == "Done")
+    return out
+
+
 def _jira_linked_keys(row):
     """The other tickets a Jira link joins to this one, either direction: a link
     is how Jira says two tickets are the same work (Fireline's alert to the
@@ -758,7 +796,7 @@ def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None)
         url=row.get("url") or JIRA_BASE + key,
         links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc))
               + _jira_linked_keys(row),
-        blocked_by=blocked_by, states=states, detail=detail, facts=facts,
+        blocked_by=blocked_by, linked=_jira_links(row), states=states, detail=detail, facts=facts,
         times={"updated": _iso(updated or row.get("updated")), "created": _iso(row.get("created"))})
 
 

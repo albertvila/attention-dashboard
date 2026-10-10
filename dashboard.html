@@ -132,6 +132,7 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;ma
 .jira-line .badge{margin-left:6px;vertical-align:1px}
 /* What holds a card up: the words are the signal, the key is the link. */
 .blocked .blocked-label{color:#e3b341;font-size:11px;margin-right:6px}
+.linked .link-label{color:#8b949e;font-size:11px;margin-right:6px}
 .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid transparent}
 .badge.needs{background:#f851491f;color:#ff7b72;border-color:#f8514955}
 .badge.ready{background:#3fb9501f;color:#7ee787;border-color:#3fb95055}
@@ -383,8 +384,7 @@ function render(data){
     }
     app.appendChild(s);
   }
-  for(const fold of [['With support', view.folds.support, view.notes.support()],
-                     ['Parked', view.folds.parked, view.notes.parked()],
+  for(const fold of [['Parked', view.folds.parked, view.notes.parked()],
                      ['Drafts', view.folds.drafts, view.notes.drafts()],
                      ['Recently closed', view.folds.closed, '']]){
     if(fold[1].length) app.appendChild(foldBox(fold[0], fold[1], fold[2]));
@@ -393,9 +393,8 @@ function render(data){
   app.appendChild(helpBox([
     'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look, then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
     'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, tickets to deploy — and a card whose merged member finished while its ticket or issue still waits, that finished work struck underneath). Waiting on others: you handed off (PRs awaiting review, tickets in progress). When Needs is empty, its line names the next card that could be picked up.',
-    'Support — a Jira ticket in Support Investigating is waiting on others, and renders in the collapsed With support fold rather than the Waiting queue. Expand the fold to read it.',
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
-    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
+    'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. A Jira link that is not a dependency gets a line of its own under the card: linked KEY, its type, its status and its summary, open tickets first, so the ticket you raised with another team and are waiting on is readable without opening Jira. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session (herdr focuses the pane\'s tab; bb opens the thread and raises the bb window). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
@@ -606,6 +605,24 @@ function paintSpecs(){
    links, age and parking — is here rather than per layout. The one exception is
    the rules' own 'gone' flag: struck history drops the states and facts that
    would read as live work, and keeps what it was and when it went. */
+/* One linked ticket on the card's own line: its key, its type, its status and
+   its summary — Jira hands all of it back with the link, so naming it costs no
+   second call. The label is the only difference between a blocker and a link
+   the card merely carries. */
+function jiraLinkLine(kind, label, lk){
+  const line = el('div','jira-line ' + kind);
+  line.appendChild(el('span', kind + '-label', label));
+  const a = document.createElement('a');
+  a.className='jira'; a.href=lk.url || ('https://launchmetrics.atlassian.net/browse/'+lk.key);
+  a.target='_blank'; a.rel='noreferrer';
+  a.textContent = lk.key;
+  line.appendChild(a);
+  if(lk.type) line.appendChild(el('span','jira-type', lk.type));
+  if(lk.status) line.appendChild(el('span','badge ' + jiraTone(lk.status_category), lk.status));
+  if(lk.summary) line.appendChild(el('span','jira-summary', lk.summary));
+  return line;
+}
+
 function card(it, kind){
   const chg = view.flag(it);
   const gone = !!(chg && chg.kind === 'gone');
@@ -679,22 +696,12 @@ function card(it, kind){
     }
     b.appendChild(jr);
   }
-  /* What holds this card up, so the wait is readable without opening Jira: the
-     blocker's own key, status and summary, one line each. Struck history keeps
-     none of it — a ghost's blockers are as stale as the card. */
-  if(!gone) for(const blk of it.blocked_by || []){
-    const line = el('div','jira-line blocked');
-    line.appendChild(el('span','blocked-label', 'blocked by '));
-    const ba = document.createElement('a');
-    ba.className='jira'; ba.href=blk.url || ('https://launchmetrics.atlassian.net/browse/'+blk.key);
-    ba.target='_blank'; ba.rel='noreferrer';
-    ba.textContent = blk.key;
-    line.appendChild(ba);
-    if(blk.type) line.appendChild(el('span','jira-type', blk.type));
-    if(blk.status) line.appendChild(el('span','badge ' + jiraTone(blk.status_category), blk.status));
-    if(blk.summary) line.appendChild(el('span','jira-summary', blk.summary));
-    b.appendChild(line);
-  }
+  /* Jira links that are not dependencies — the ticket you raised with another
+     team and are waiting on — read like a blocker: key, its own type, status
+     and summary, all of it carried by the link. Struck history keeps none of
+     it: a ghost's links are as stale as the card. */
+  if(!gone) for(const blk of it.blocked_by || []) b.appendChild(jiraLinkLine('blocked', 'blocked by ', blk));
+  if(!gone) for(const lk of it.linked || []) b.appendChild(jiraLinkLine('linked', 'linked ', lk));
   if(it.labels && it.labels.length){
     const ls = el('div','labels');
     for(const l of it.labels) ls.appendChild(labelChip(l));
