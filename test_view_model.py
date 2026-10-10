@@ -14,6 +14,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import contextlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1207,6 +1208,24 @@ class OpenSessions(unittest.TestCase):
             {"stalkTeams": ["squad-platform", "../evil", 3, "team-payments"]}),
             ["squad-platform", "team-payments"])
 
+    def test_the_roster_leaves_me_out_and_the_you_row_carries_my_login(self):
+        """You are the "You" row, so the roster below is everyone else — a roster
+        that names you twice is a roster you stop reading. My login rides along
+        because the avatar on that row has to come from somewhere."""
+        listing = [{"login": "albertvila"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
+
+        class Live:
+            def json(self, command, args):
+                if "teams/" in args[1]:
+                    return listing
+                return {"name": "Ada Lovelace"}
+
+        with mock.patch.object(attention, "LIVE", Live()):
+            out = attention.team_members(config={"stalkTeams": ["squad-platform"]}, me="albertvila")
+        self.assertEqual(out["you"], {"login": "albertvila"})
+        self.assertEqual([p["login"] for p in out["people"]], ["teammate-one"])     # bots and me left out
+        self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
+
     def test_the_stalker_switch_closes_the_teammate_queue(self):
         """`stalker: false` is the whole feature off: no faces to click and no
         queue read behind one, without touching the team list itself."""
@@ -1216,7 +1235,7 @@ class OpenSessions(unittest.TestCase):
         self.assertTrue(attention.stalker_on({"stalker": "no"}))
         off = dict(teams, stalker=False)
         self.assertFalse(attention.stalker_on(off))
-        self.assertEqual(attention.team_members(config=off), [])
+        self.assertEqual(attention.team_members(config=off), {"you": {}, "people": []})
         self.assertEqual(attention.their_queue("teammate-one", config=off),
                          {"error": "stalker is off"})
 

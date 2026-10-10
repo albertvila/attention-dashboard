@@ -1824,12 +1824,16 @@ def _error(where, exc):
     return entry
 
 
-def team_members(config=None):
-    """Members of `stalkTeams` in config.json, bots left out. Not the snapshot.
-    Read each request, so editing the file changes the rail on the next look."""
+def team_members(config=None, me=None):
+    """Members of `stalkTeams` in config.json under `people` — bots and *me* left
+    out, because the reader is the "You" row and a roster that names you twice is
+    a roster you stop reading. My own login rides along as `you`, since the avatar
+    on that row has to come from somewhere. Not the snapshot: read each request,
+    so editing the file changes the rail on the next look."""
     config = load_config() if config is None else config
     if not stalker_on(config):
-        return []
+        return {"you": {}, "people": []}      # no switch, no box, no who-am-I read
+    me = me if me is not None else _whoami(partial(LIVE.json, "gh"))
     people = {}
     for slug in stalk_teams(config):
         try:
@@ -1838,7 +1842,7 @@ def team_members(config=None):
             continue
         for member in members:
             login = member.get("login") or ""
-            if not login or login in STALK_BOTS:
+            if not login or login in STALK_BOTS or login == me:
                 continue
             person = people.setdefault(login, {"login": login, "name": login, "teams": []})
             if slug not in person["teams"]:
@@ -1850,7 +1854,8 @@ def team_members(config=None):
         except CliError:
             pass
     _each(face, people)
-    return sorted(people.values(), key=lambda p: p["name"].lower())
+    return {"you": {"login": me},
+            "people": sorted(people.values(), key=lambda p: p["name"].lower())}
 
 
 def jira_account(login):

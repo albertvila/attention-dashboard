@@ -51,7 +51,7 @@ are yours.
 | key | default | what it does |
 |---|---|---|
 | `specRepos` | `[]` | repos where the **Specs** rail takes every `spec`-labelled issue, whoever wrote it — for reading a teammate's proposal before someone takes it. Everywhere else the rail is yours alone. With watched rows in play the rail splits into **Mine** and **Watched repos**, each row showing its writer's avatar, the login on hover. |
-| `stalkTeams` | `[]` | GitHub team slugs whose members appear under Ongoing work. Click one to see their queue. Empty means no team list. |
+| `stalkTeams` | `[]` | GitHub team slugs whose members appear under Ongoing work. Click one to see their queue. You are the first row — **You**, wearing your own avatar — and never appear in the list below it, so no face is on the panel twice. Empty means no team list. |
 | `stalker` | on | The switch over that whole feature: `false` hides the team faces and refuses `/queue`, so nothing is read as anyone else — your `stalkTeams` list stays as it is. Absent means on. |
 
 ### What needs your machine
@@ -256,6 +256,12 @@ machine state, not a view of the queue. The repository name is the whole join to
 a card: it is on the card's own line and on the box. A Jira card names no
 repository, so nothing joins to it. The repository is read from the checkout's own
 git remote, so no name guessing is involved.
+
+The **Team** box at the top of that rail is the roster of the teams in
+`stalkTeams` — the one way into somebody else's queue. **You** is the first row
+and wears your own avatar; the list under it is everyone else, so nobody is on
+the panel twice, and the roster read knows who to leave out. `stalker: false`
+takes the whole box away rather than emptying it.
 
 **Specs** are the open issues I wrote with the `spec` label and **no assignee**:
 nobody has taken them, so they are groundwork rather than work. An assignee — and
