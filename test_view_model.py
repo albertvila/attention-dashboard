@@ -1227,26 +1227,32 @@ class OpenSessions(unittest.TestCase):
     def test_the_roster_leaves_me_out_and_the_you_row_carries_my_login(self):
         """You are the "You" row, so the roster below is everyone else — a roster
         that names you twice is a roster you stop reading. My login rides along
-        because the avatar on that row has to come from somewhere."""
-        listing = [{"login": "you"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
+        because the avatar on that row has to come from somewhere. Each person
+        carries the teams they were listed under, which is what the box groups
+        by."""
 
         class Live:
-            """The roster read: the team listing, then one query for the names."""
+            """The roster read: one listing per team, then one query for the names."""
 
             def json(self, command, args):
-                if "teams/" in args[1]:
-                    return listing
+                if "squad-platform" in args[1]:
+                    return [{"login": "you"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
+                if "team-payments" in args[1]:
+                    return [{"login": "teammate-one"}, {"login": "teammate-two"}]
                 raise AssertionError("a name read must be batched, not per member")
 
             def graphql(self, query):
                 return {"data": {"n0": {"login": "ribugent", "name": "Ada Lovelace"}}}
 
         with mock.patch.object(attention, "LIVE", Live()):
-            out = attention.team_members(config={"stalkTeams": ["squad-platform"], "stalker": True},
-                                            me="you")
+            out = attention.team_members(config={"stalkTeams": ["squad-platform", "team-payments"],
+                                                "stalker": True}, me="you")
         self.assertEqual(out["you"], {"login": "you"})
-        self.assertEqual([p["login"] for p in out["people"]], ["teammate-one"])     # bots and me left out
-        self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
+        self.assertEqual([p["login"] for p in out["people"]], ["teammate-one", "teammate-two"])
+        self.assertEqual(out["people"][0]["name"], "Ada Lovelace")            # bots and me left out
+        # the faces the box groups by: one team, or both when the read listed them twice
+        self.assertEqual(out["people"][0]["teams"], ["squad-platform", "team-payments"])
+        self.assertEqual(out["people"][1]["teams"], ["team-payments"])
 
     def test_the_stalker_switch_closes_the_teammate_queue(self):
         """`stalker: false` is the whole feature off: no faces to click and no

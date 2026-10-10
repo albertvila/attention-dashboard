@@ -45,6 +45,9 @@ main{max-width:1380px;margin:0 auto;padding:6px 26px 80px;display:grid;
 .teammate{display:flex;gap:6px;align-items:center;width:100%;text-align:left;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:3px 8px 3px 3px;cursor:pointer;font:inherit;font-size:12px}
 .teammate.on{border-color:#d29922;color:#e3b341}
 .teammate img{width:20px;height:20px;border-radius:50%;background:#30363d}
+/* The team a face stands under, so the roster reads as membership rather than one
+   list: a face on two teams stands under both. */
+.teamname{margin:8px 0 0;color:#8b949e;font-size:11px;font-weight:600}
 body.viewing #specs{display:none}
 body.viewing main{grid-template-columns:minmax(0,1fr) 262px}
 body.viewing #sessions > :not(.team){display:none}
@@ -410,7 +413,7 @@ function render(data){
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
     'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. A Jira link that is not a dependency gets a line of its own under the card: linked KEY, its type, its status and its summary, open tickets first, so the ticket you raised with another team and are waiting on is readable without opening Jira. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
     'Ongoing work — the right rail, one box per repository with an agent session open on it: one row per session, green while an agent is working, amber when blocked, grey when the pane is merely open, with herdr / bb buttons that open that session and raise the app that holds it (herdr focuses the pane\'s tab, bb opens the thread; both bring the window forward, since a jump you cannot see is not a jump). Sessions are read live from herdr and bb every time you look. The repository name is the only join a card has to a session — a Jira card names no repository, so nothing joins to it.',
-    'Team — the box above the sessions lists the members of the teams config.json names under stalkTeams. You come first, wearing your own avatar, and are not listed again below it; click a face to read that person\'s queue, and You to come back to your own.',
+    'Team — the box above the sessions lists the members of the teams config.json names under stalkTeams, one group per team and each named by its slug, so somebody on two teams stands under both. You come first, wearing your own avatar, and are not listed again in the groups below it; click a face to read that person\'s queue, and You to come back to your own.',
     'Specs — the left rail lists the open issues I wrote with the spec label that nobody has taken (no assignee): a backlog, so they never count in a tier and cannot be parked. An assignee means someone is already on it — usually me, which is why those are already on the board. In the repos config.json names under specRepos it reads everyone\'s spec instead, because a teammate\'s proposal is worth reading before somebody takes it, and when both are in play the rail keeps them apart — Mine above Watched repos — each row showing the writer\'s avatar, their login on hover. One that the queue is showing anyway reads "already on the board".',
     'Change marks — a coloured edge and small text mean "since your last look": new, moved (A → B), or dropped. A card that changed section is also a button under the sentence, so you can jump to where it went. A refresh keeps your scroll and the folds you had open. Work that has closed is never new, wherever it rides. A card that left the queue renders as struck history in the section it left — no state pills and no facts, just what it was and when it went; unless its linked items are all still live, in which case they already carry it and it does not render at all.',
     'Next line — every card you can act on says what it is asking for, in one sentence, from the evidence the board already has: a merged PR the ticket still waits on, a ready PR nobody has merged, a ticket to deploy, an approval you owe — or a comment somebody left after your last look, which outranks the status because a person is waiting. It names that evidence on hover, and it never changes a tier or a count. Two things earn the line: a rule that asks you to do something (shown wherever the card sits), and — in Needs and Ready only — the absence of one, which says the answer is in something the board has not read. The comments are read live, one call per card, reused until the card moves.',
@@ -607,14 +610,33 @@ function paintSessions(){
 }
 
 let team = [], me = '';
+/* The teams one face names, and never nothing: a face the roster read gave no
+   team keeps a group of its own rather than falling off the panel. */
+const teamsOf = p => Array.isArray(p.teams) && p.teams.length ? p.teams : [''];
+
+function teammateRow(p){
+  const b = el('button', 'teammate' + (p.login === viewing ? ' on' : ''));
+  const img = document.createElement('img');
+  img.alt = ''; img.src = 'https://github.com/' + encodeURIComponent(p.login) + '.png?size=64';
+  b.appendChild(img);
+  b.appendChild(document.createTextNode(p.name.split(' ')[0]));
+  b.title = p.name;
+  b.onclick = () => {
+    const u = new URL(location.href);
+    u.searchParams.set('user', p.login);
+    location.href = u;
+  };
+  return b;
+}
+
 function paintTeam(){
   const old = sessionsRail.querySelector('.team');
   if(old) old.remove();
   if(!team.length) return;      // no teams listed, or the stalker switched off: no box, no way in
   const box = el('div', 'team');
   box.appendChild(el('h2', null, 'Team'));
-  /* You are the first row, wearing your own avatar; the roster below is everyone
-     else, so nobody appears twice. */
+  /* You are the first row, wearing your own avatar; the groups below are
+     everyone else, so the reader is never in the roster. */
   const you = el('button', 'teammate' + (viewing ? '' : ' on'));
   if(me){
     const face = document.createElement('img');
@@ -625,19 +647,12 @@ function paintTeam(){
   you.appendChild(document.createTextNode('You'));
   you.onclick = () => { location.search = ''; };
   box.appendChild(you);
-  for(const p of team){
-    const b = el('button', 'teammate' + (p.login === viewing ? ' on' : ''));
-    const img = document.createElement('img');
-    img.alt = ''; img.src = 'https://github.com/' + encodeURIComponent(p.login) + '.png?size=64';
-    b.appendChild(img);
-    b.appendChild(document.createTextNode(p.name.split(' ')[0]));
-    b.title = p.name;
-    b.onclick = () => {
-      const u = new URL(location.href);
-      u.searchParams.set('user', p.login);
-      location.href = u;
-    };
-    box.appendChild(b);
+  /* One group per team, alphabetical, each named by its slug: the roster is
+     membership, so somebody on two teams stands under both. A team the roster
+     read never named gets no heading rather than a nameless one. */
+  for(const slug of [...new Set(team.flatMap(teamsOf))].sort()){
+    if(slug) box.appendChild(el('h3', 'teamname', slug));
+    for(const p of team) if(teamsOf(p).indexOf(slug) !== -1) box.appendChild(teammateRow(p));
   }
   sessionsRail.appendChild(box);
 }

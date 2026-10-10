@@ -27,7 +27,7 @@ const snapshot = (at, tiers = []) => ({
 /* The page is a document, so every element it asks for is a stub that answers
    with another stub; the two things under test are the ones it is not. */
 function mount(opts = {}) {
-  const collected = [], stamped = [], elements = {}, created = [];
+  const collected = [], stamped = [], elements = {}, created = [], titles = [];
   const stub = () => new Proxy(
     { classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, style: {}, dataset: {},
       appendChild: stub, addEventListener(){}, remove(){}, focus(){} },
@@ -39,7 +39,8 @@ function mount(opts = {}) {
     { classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, style: {}, dataset: {},
       appendChild: stub, addEventListener(){}, remove(){}, focus(){} },
     { get: (t, k) => (k in t ? t[k] : (t[k] = () => stub())),
-      set: (t, k, v) => { t[k] = v; if (k === 'textContent') created.push({cls: t.className, text: v}); return true; } });
+      set: (t, k, v) => { t[k] = v; if (k === 'textContent') created.push({cls: t.className, text: v});
+                          if (k === 'title') titles.push({cls: t.className, title: v}); return true; } });
   let now = NOW, interval = null, state = 'visible';
   const ctx = {
     console, setTimeout, clearTimeout, Proxy,
@@ -55,6 +56,9 @@ function mount(opts = {}) {
       // a rail that never answers is a rail that must not hold the board
       if (opts.railsSilent && (String(url).startsWith('/specs') || String(url).startsWith('/sessions'))) {
         return new Promise(() => {});
+      }
+      if (opts.team && String(url).startsWith('/team')) {
+        return { json: async () => opts.team };
       }
       if (opts.comments && String(url).startsWith('/comments')) {
         return { json: async () => opts.comments };
@@ -77,7 +81,7 @@ function mount(opts = {}) {
   vm.runInContext(readFileSync(join(here, 'attention-view.js'), 'utf8'), context);
   vm.runInContext(page, context);
   return {
-    collected, stamped, created, intervalMs: () => interval && interval.ms,
+    collected, stamped, created, titles, intervalMs: () => interval && interval.ms,
     element: id => elements[id],
     textsOf: cls => created.filter(c => c.cls === cls).map(c => c.text),
     hide: () => { state = 'hidden'; },
@@ -186,5 +190,21 @@ assert.ok(!fresh.textsOf('do').includes('answer Ada'), 'a first look flags nothi
 const C = mount({ railsSilent: true, seen: '2026-10-07T12:00:00.000Z', comments: saidThread, tiers: saidTiers });
 await tick(); await tick();
 assert.ok(C.textsOf('do').includes('answer Ada'), 'the thread lands on the card as the line');
+
+/* The Team box is a roster, not one flat list: one group per team, named by its
+   slug, and somebody on two teams stands under each — while the reader is the row
+   above them and never inside a group. A face the read gave no team at all keeps
+   a row rather than falling off the panel. */
+const T = mount({ railsSilent: true, team: {
+  you: { login: 'albertvila' },
+  people: [{ login: 'ana', name: 'Ana Plaza', teams: ['team-den'] },
+           { login: 'bo', name: 'Bo Diaz', teams: ['squad-data', 'team-den'] },
+           { login: 'cy', name: 'Cy Ruiz', teams: ['squad-data'] },
+           { login: 'di', name: 'Di Solo' }] } });
+await tick(); await tick();
+const roster = T.titles.filter(t => String(t.cls).startsWith('teammate')).map(t => t.title);
+assert.deepEqual(T.textsOf('teamname'), ['squad-data', 'team-den'], 'one group per team, named by its slug');
+assert.deepEqual(roster, ['albertvila', 'Di Solo', 'Bo Diaz', 'Cy Ruiz', 'Ana Plaza', 'Bo Diaz'],
+  'you first, then each team\u2019s members, the two-team face under both, a teamless face still on it');
 
 console.log('dashboard sweep: all checks passed');
