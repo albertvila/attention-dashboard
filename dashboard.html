@@ -399,7 +399,7 @@ function render(data){
   }
   if(data.hidden_bots) app.appendChild(el('div','hidden','+'+data.hidden_bots+' hidden (bot-authored review requests)'));
   app.appendChild(helpBox([
-    'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look, then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
+    'Reading order — the Briefing reads top to bottom: a dated sentence saying what is new, changed and dropped since your last look (and, when there are any, how many cards you can act on say nothing at all), then Needs you now as generous blocks, then Ready when you are and Waiting on others as one-line rows, then the collapsed folds.',
     'Tiers — Needs you now: the ball is yours (review requests, failing checks, unresolved threads, replies owed, unstarted work). Ready when you are: nothing blocks you (approved and green PRs, tickets to deploy — and a card whose merged member finished while its ticket or issue still waits, that finished work struck underneath). Waiting on others: you handed off (PRs awaiting review, tickets in progress). When Needs is empty, its line names the next card that could be picked up.',
     'Folds — a card in a fold is not in a tier count. Every fold shows its count and the description the rules give it (the oldest age, conflicted drafts, the parked kinds); a fold with no note shows its count only.',
     'Linking — a card with linked items carries its count at the row\'s right, N linked, beside age and parking, expanding them in place; a card with no links carries no count, and a linked child keeps its own chip, ref, states, facts, labels, detail and age — struck when it has closed, so finished work riding in a live card never reads as work you just picked up. A Jira link that is not a dependency gets a line of its own under the card: linked KEY, its type, its status and its summary, open tickets first, so the ticket you raised with another team and are waiting on is readable without opening Jira. Two Jira tickets linked to each other are one card too; when one is a Fireline alert (the FIRE- project), the other names the card and lands it, and the alert rides underneath.',
@@ -527,9 +527,12 @@ function sessionBox(repo, live){
    already means. A card in Needs or Ready with nothing to say says so, because
    there a silence is the signal: the answer is in something we have not read. */
 function nextLineEl(it){
-  const l = view.nextOf(it, { comment: comments[it.key] || [] });
+  const l = view.nextOf(it);
   const room = ['needs','ready'].indexOf(it.section || it.tier) !== -1;
-  if(!((l.next && l.next.act) || (!l.next && room))) return null;
+  // On a card you can act on, something always shows: the action, the wait, or
+  // the plain statement that the board has nothing. Elsewhere only an action
+  // earns a line — "nothing to do" is what the tier already means.
+  if(!(l.next ? (l.next.act || room) : room)) return null;
   const nl = el('div','nextline' + (l.next ? '' : ' quiet'));
   nl.appendChild(el('b', null, 'next'));
   if(l.next){
@@ -558,7 +561,11 @@ async function paintComments(){
   }catch(e){
     return;
   }
-  for(const it of rows){
+  // The evidence goes back through the view, so the lines on the cards and the
+  // count in the sentence are the same rule reading the same thing.
+  view = AttentionView.overlay(snap, {seenAt: viewing ? null : seenAt, snoozes, acks, specs,
+                                      reads: {comment: comments}});
+  for(const it of view.tiers.flatMap(t => t.rows)){
     if(!comments[it.key]) continue;
     const host = document.querySelector('.row[data-key="' + CSS.escape(it.key) + '"]');
     if(!host) continue;
@@ -568,6 +575,7 @@ async function paintComments(){
     const meta = host.querySelector('.body > .meta');
     if(fresh && meta) meta.after(fresh);
   }
+  sentence.textContent = viewing ? (viewing + ' \u00b7 ' + view.summaryText()) : view.summaryText();
 }
 
 function paintSessions(){

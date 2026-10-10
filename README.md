@@ -415,7 +415,8 @@ from `attention-view.js`.
   A rule that asks you to do something shows wherever the card sits; a rule that
   only says you are waiting shows nowhere, because that is what the tier already
   means. A card in Needs or Ready with nothing to say says so — the answer is in
-  something the board has not read.
+  something the board has not read — and the summary sentence counts those cards
+  (`· 2 say nothing`), so a week of silence is a number rather than a feeling.
 - A card with linked items carries `N linked` at the row's right, beside age and
   parking, expanding them in place; a card with no links carries no count. Each
   child keeps its own chip, ref, states, facts, labels, detail and age — one

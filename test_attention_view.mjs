@@ -408,22 +408,54 @@ assert.equal(nl.next.act, false);
 nl = view.nextOf(row({}));
 assert.equal(nl.next, null);
 assert.deepEqual(nl.wanting.map(w => w.needs), ['comment', 'transition']);
+// and a card that only waits still reports the wait, not a silence
+assert.equal(view.nextOf(row({ states: [SUP2] })).next.act, false);
 
-// read one more thing and a rule answers, without any other rule changing
-const lineAfter = (reads, comes, ctx) => view.nextOf(row(comes), reads, ctx);
+// read one more thing and a rule answers, without any other rule changing: the
+// evidence arrives with the overlay, the way a surface hands it over
 const LANDED = { comment: [{ at: '2026-10-02T11:30:00.000Z', who: 'Ada', text: 'can you re-run this?' }] };
-assert.match(lineAfter(LANDED, {}, { lastLook: '2026-10-02T11:00:00.000Z' }).next.say,
+const readView = (reads, seenAt) => overlay(data(), { reads, seenAt });
+assert.match(readView({ comment: { 'FIRE-1': LANDED.comment } }, '2026-10-02T11:00:00.000Z').nextOf(row()).next.say,
   /^answer Ada — they wrote after your last look/);
-assert.equal(lineAfter(LANDED, {}, { lastLook: '2026-10-02T12:00:00.000Z' }).next, null);   // looked since: not news
-assert.equal(lineAfter({}, { states: [SUP2] }, {}).next.act, false);                        // reads change nothing else
-nl = lineAfter({ transition: ['Deploy to Prod', 'Close'] }, { states: [{ key: 'to-deploy', label: 'to deploy', tier: 'ready', tone: 'info' }] }, {});
-assert.match(nl.next.say, /— Jira offers Deploy to Prod, Close$/);
+assert.equal(readView({ comment: { 'FIRE-1': LANDED.comment } }, '2026-10-02T12:00:00.000Z').nextOf(row()).next, null);
+// read and empty is not the same as not read: one leaves the card waiting, the other does not
+assert.equal(readView({ comment: { 'FIRE-1': [] } }, NOW).nextOf(row()).wanting.some(w => w.needs === 'comment'), false);
+assert.equal(overlay(data(), {}).nextOf(row()).wanting.some(w => w.needs === 'comment'), true);
+// and it outranks a wait: the card still links to another team's ticket, and the
+// message that landed since your last look is the thing you can act on
+assert.match(readView({ comment: { 'FIRE-1': LANDED.comment } }, '2026-10-02T11:00:00.000Z')
+  .nextOf(row({ states: [SUP2], linked: [{ key: 'FISRE-27667', status: 'In Progress', status_category: 'In Progress' }] })).next.say,
+  /^answer Ada/);
+// a kind nobody has read yet is reachable the moment something provides it
+assert.match(readView({ transition: { 'FIRE-1': ['Deploy to Prod', 'Close'] } }, NOW)
+  .nextOf(row({ states: [{ key: 'to-deploy', label: 'to deploy', tier: 'ready', tone: 'info' }] })).next.say,
+  /— Jira offers Deploy to Prod, Close$/);
 
 // reading a line never touches the row: this is all read-side
 const untouched = row({ children: [kid({ states: [{ key: 'ready', label: 'ready', tier: 'ready', tone: 'good' }] })] });
 const before = JSON.stringify(untouched);
 view.nextOf(untouched);
 assert.equal(JSON.stringify(untouched), before);
+
+// --- the silence in the sentence ---------------------------------------------
+// Silence is a number, not a feeling: the cards you can act on that ask for
+// nothing from what has been read. Same test as the surface's own "nothing from
+// the board" line, so the sentence and the cards cannot disagree.
+const mergedKid = { ref: 'o/r#9', title: 'a PR', chip: 'MY PR', times: {},
+                    states: [{ key: 'merged', label: 'merged', tier: 'ready', tone: 'good' }] };
+const silData = data({ tiers: [
+  { key: 'needs', title: 'n', items: [row({ key: 'N1' })] },
+  { key: 'ready', title: 'r', items: [row({ key: 'R1', children: [mergedKid] }),
+    row({ key: 'G9', section: 'ready', goneAt: '2026-10-02T11:30:00.000Z', change: { kind: 'gone' } })] },
+  { key: 'waiting', title: 'w', items: [row({ key: 'W1' })] }] });
+const sv = overlay(silData, { now: NOW });
+assert.equal(sv.silentCount(), 1);                                  // N1 only: W1 is not counted, G9 is a ghost
+assert.match(sv.summaryText(), /\u00b7 1 say nothing$/);
+assert.equal(overlay(data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 'ready', title: 'r', items: [] },
+                                    { key: 'waiting', title: 'w', items: [row()] }] }), { now: NOW })
+  .summaryText().includes('say nothing'), false);                   // nothing silent, nothing said
+assert.match(overlay({ ...silData, changes: {} }, { now: NOW }).summaryText(),
+  /^first look \u00b7 nothing to compare \u00b7 1 say nothing$/);
 
 // --- stale-code witness -----------------------------------------------------
 assert.deepEqual(globalThis.AttentionView.stale({ producer: { code: 'aaa' } }, { producer: { code: 'aaa' } }),

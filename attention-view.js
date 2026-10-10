@@ -111,6 +111,14 @@
   /* In order: first one that fires wins. Each says what to do and which evidence
      the sentence stands on. */
   const NEXT_RULES = [
+    /* A person who wrote to you outranks a wait: the wait was already true and
+       the message is new — and it is the one thing a status cannot tell you. */
+    { id: 'answer-a-human', act: true, needs: 'comment',
+      when: (c, ctx) => {
+        const h = c.humans.slice(-1)[0];
+        if (!h || !(ctx.lastLook && h.at > ctx.lastLook)) return null;
+        return { say: 'answer ' + h.who + ' — they wrote after your last look', why: h.who + ' commented, nothing has moved since' };
+      } },
     { id: 'open-link', act: false, needs: 'link',
       when: c => {
         const l = c.openLinks[0];
@@ -122,12 +130,6 @@
         const b = c.openBlockers[0];
         if (!b) return null;
         return { say: 'held by ' + b.ref + ' until it is done', why: 'Jira says this is blocked by ' + b.ref + ', still ' + b.status };
-      } },
-    { id: 'answer-a-human', act: true, needs: 'comment',
-      when: (c, ctx) => {
-        const h = c.humans.slice(-1)[0];
-        if (!h || !(ctx.lastLook && h.at > ctx.lastLook)) return null;
-        return { say: 'answer ' + h.who + ' — they wrote after your last look', why: h.who + ' commented, nothing has moved since' };
       } },
     { id: 'merge-a-ready-pr', act: true, needs: 'child',
       when: c => {
@@ -218,6 +220,19 @@
     const seenAt = opts.seenAt || null;
     const snoozes = opts.snoozes || {};
     const acks = opts.acks || {};
+    /* What a per-card read landed, if a surface has read it:
+       {kind: {key: [evidence]}} — the same kinds the rules declare. It arrives
+       after the board has painted, so a surface rebuilds the view with it. A card
+       with no entry was not read, which is a different thing from read and empty:
+       the first leaves the card waiting on that kind, the second does not. */
+    const reads = opts.reads || {};
+    const readsFor = row => {
+      const out = {};
+      for (const kind of Object.keys(reads)) {
+        if (Object.prototype.hasOwnProperty.call(reads[kind], row.key)) out[kind] = reads[kind][row.key];
+      }
+      return Object.keys(out).length ? out : null;
+    };
     const now = opts.now || new Date().toISOString();
     const since = seenAt || (data.changes || {}).previousAt || null;
     const rows = [].concat(...(data.tiers || []).map(t => t.items), data.drafts || [], data.closed || []);
@@ -318,13 +333,26 @@
       return { new: fresh, changed: moved, gone: gone.filter(r => since && r.goneAt > since).length };
     }
 
+    /** The cards you can act on that ask for nothing: Needs and Ready, minus the
+        ghosts riding there. This is the count the sentence reports, and the same
+        test a surface uses for its "nothing from the board" line. */
+    function silentCount() {
+      const room = tiers.filter(t => t.key === 'needs' || t.key === 'ready');
+      return [].concat(...room.map(t => t.rows))
+        .filter(r => !(r.change && r.change.kind === 'gone') && !nextOf(r, readsFor(r)).next)
+        .length;
+    }
+
     function summaryText() {
-      if (!since) return 'first look · nothing to compare';
       const c = counts();
-      const when = seenAt
-        ? `since your last look (${new Date(seenAt).toLocaleTimeString()})`
-        : 'since the previous snapshot';
-      return `${c.new} new · ${c.changed} changed · ${c.gone} dropped ${when}`;
+      const sentence = !since ? 'first look \u00b7 nothing to compare'
+        : c.new + ' new \u00b7 ' + c.changed + ' changed \u00b7 ' + c.gone + ' dropped '
+          + (seenAt ? 'since your last look (' + new Date(seenAt).toLocaleTimeString() + ')'
+                    : 'since the previous snapshot');
+      // Silence is a number, not a feeling: how many cards you can act on have
+      // nothing to say from what has been read. Nothing to say, nothing said.
+      const silent = silentCount();
+      return silent ? sentence + ' \u00b7 ' + silent + ' say nothing' : sentence;
     }
 
     /** The rows that moved since your last look, in the order a surface renders
@@ -346,13 +374,12 @@
 
     return {
       snoozeOf, ackOf, parked, specs,
-      /** The line one card asks for, from the evidence the board already has.
-          `reads` carries whatever a per-card read added; nothing here reads. */
-      nextOf: (row, reads, ctx) => nextOf(row, reads,
-        { lastLook: (ctx || {}).lastLook !== undefined ? ctx.lastLook : seenAt }),
+      /** The line one card asks for, from the evidence the board already has plus
+          whatever per-card reads landed (`options.reads`). Nothing here reads. */
+      nextOf: row => nextOf(row, readsFor(row), { lastLook: seenAt }),
       flag: row => flagOf(row, since),
       closed: isClosed,
-      tiers, folds, notes, nextCard, counts, summaryText, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
+      tiers, folds, notes, nextCard, counts, summaryText, silentCount, changedRows, formatWhen, changeLabel, changeTone, changeClass,      /** The five choices one control offers: hours, or "ack" (until it changes). */
       choices: [
         { value: '4', label: '4 hours' },
         { value: '24', label: '1 day' },
