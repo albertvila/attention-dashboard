@@ -243,8 +243,8 @@ const wData = (items) => data({ tiers: [{ key: 'needs', title: 'n', items: [] },
 const groupRows = (v) => v.tiers[2].groups.flatMap(g => g.rows);
 
 // the key is the repository the card belongs to...
-view = overlay(wData([row({ key: 'R1', ref: 'albertvila/attention-dashboard#14',
-                            container: 'albertvila/attention-dashboard' })]), { now: NOW });
+view = overlay(wData([row({ key: 'R1', ref: 'you/attention-dashboard#14',
+                            container: 'you/attention-dashboard' })]), { now: NOW });
 assert.equal(view.tiers[2].groups[0].key, 'attention-dashboard');
 assert.equal(view.tiers[2].rows[0].groupKey, 'attention-dashboard');   // the row says where it landed
 // ...else the Jira project its key names, which is all a Jira card has...
@@ -324,9 +324,9 @@ const sessData = data({ tiers: [{ key: 'needs', title: 'n', items: [] }, { key: 
   { key: 'waiting', title: 'w', items: [row({ key: 'acme/shared-lib#412', ref: 'shared-lib#412',
                                                 container: 'acme/shared-lib' })] }] });
 view = overlay(sessData, { now: NOW,
-                           specs: [{ ref: 'acme/shared-lib#412' }, { ref: 'Launchmetrics/PLS-rubn#9' }] });
+                           specs: [{ ref: 'acme/shared-lib#412' }, { ref: 'acme/PLS-rubn#9' }] });
 assert.deepEqual(view.specs.map(s => [s.ref, s.onBoard]),
-  [['acme/shared-lib#412', true], ['Launchmetrics/PLS-rubn#9', false]]);
+  [['acme/shared-lib#412', true], ['acme/PLS-rubn#9', false]]);
 // with nothing read, every spec reads as a suggestion and no card grows anything
 view = overlay(data(), { now: NOW });
 assert.deepEqual(view.specs, []);

@@ -257,12 +257,11 @@ class CollectionFromARecording(unittest.TestCase):
         found = cards(view)
         self.assertEqual({row["chip"] for _, row in found.values()},
                          {"REVIEW", "MY PR", "ISSUE", "JIRA"})
+        # sorted(): the Jira keys are upper-case, the repos are not, so they lead
         self.assertEqual(sorted(found), [
-            "FIRE-90000", "acme/web-frontend#1933", "acme/web-frontend#2017",
-            "acme/web-frontend#2018", "acme/edge-workers#2703",
-            "acme/checkout-api#331", "acme/checkout-api#332",
-            "acme/checkout-api#334", "acme/checkout-api#335",
-            "RBT-700"])
+            "FIRE-90000", "RBT-700", "acme/checkout-api#331", "acme/checkout-api#332",
+            "acme/checkout-api#334", "acme/checkout-api#335", "acme/edge-workers#2703",
+            "acme/web-frontend#1933", "acme/web-frontend#2017", "acme/web-frontend#2018"])
         self.assertEqual(found["acme/checkout-api#335"][0], "needs")
         self.assertEqual(found["acme/checkout-api#334"][0], "ready")
         self.assertEqual(found["RBT-700"][0], "waiting")

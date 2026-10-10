@@ -78,7 +78,7 @@ class ReviewRequests(unittest.TestCase):
     def test_review_row_carries_author_and_jira_from_branch_or_title(self):
         view, _ = build()
         row = find(view, "web-frontend#2018")
-        self.assertEqual(row["author"], "lm-qinfei")
+        self.assertEqual(row["author"], "reviewer-two")
         self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/BIT-9001")
         self.assertEqual(row["container"], "acme/web-frontend")
         # no key in the branch: the bare key in the title names the ticket
@@ -115,7 +115,7 @@ class OwnPRs(unittest.TestCase):
     def test_own_pr_author_and_jira_from_branch(self):
         view, _ = build()
         row = find(view, "checkout-api#334")
-        self.assertEqual(row["author"], "albertvila")
+        self.assertEqual(row["author"], "you")
         self.assertEqual(row["jira"], "https://launchmetrics.atlassian.net/browse/FIRE-9001")
         self.assertEqual(row["container"], "acme/checkout-api")
         self.assertEqual(row["labels"], [])
@@ -517,7 +517,7 @@ class Clustering(unittest.TestCase):
 
     def test_pr_title_issue_ref_links_the_issue(self):
         row = {"number": 2331, "title": "feat: #2330 Drop Instagram stories from monthly and hourly final files",
-               "repository": {"nameWithOwner": "acme/payments-api"}, "author": {"login": "albertvila"},
+               "repository": {"nameWithOwner": "acme/payments-api"}, "author": {"login": "you"},
                "url": "https://github.com/acme/payments-api/pull/2331", "labels": [],
                "isDraft": False, "createdAt": "2026-09-29T13:30:00Z", "updatedAt": "2026-09-29T14:00:00Z"}
         items, _ = attention.items_from_review_search([row])
@@ -1145,17 +1145,17 @@ class OpenSessions(unittest.TestCase):
             {"number": 1338, "title": "App releases follow the company CI/CD standard",
              "url": "https://github.com/acme/billing-service/issues/1338",
              "updatedAt": "2026-10-06T15:46:30Z", "assignees": [],
-             "author": {"login": "albertvila"},
+             "author": {"login": "you"},
              "repository": {"nameWithOwner": "acme/billing-service"}},
             {"number": 413, "title": "Read consolidated docs once",
              "url": "https://github.com/acme/shared-lib/issues/413",
-             "updatedAt": "2026-10-06T15:10:09Z", "assignees": [{"login": "albertvila"}],
+             "updatedAt": "2026-10-06T15:10:09Z", "assignees": [{"login": "you"}],
              "repository": {"nameWithOwner": "acme/shared-lib"}}])
         issues = attention.spec_issues(cli=cli, config={})["issues"]
         self.assertEqual([i["ref"] for i in issues], ["acme/billing-service#1338"])
         self.assertEqual(issues[0]["repo"], "acme/billing-service")
         self.assertEqual(issues[0]["updated"], "2026-10-06T15:46:30Z")
-        self.assertEqual(issues[0]["author"], "albertvila")     # the rail draws their face
+        self.assertEqual(issues[0]["author"], "you")     # the rail draws their face
         self.assertFalse(issues[0]["watched"])                # read as mine, so no second list
         self.assertIn("--label=spec", cli.calls[0])
         self.assertIn("assignees", cli.calls[0][-1])      # the read asks who took it
@@ -1166,13 +1166,13 @@ class OpenSessions(unittest.TestCase):
         """config.json's specRepos: a teammate's proposal is groundwork I may want
         to read before it is taken — in the repos I named, and only there. Each row
         says which read it came from, so a rail can keep the two apart."""
-        cli = self.Fake(issues=[self.spec(10, "acme/shared-lib", author="albertvila")],
+        cli = self.Fake(issues=[self.spec(10, "acme/shared-lib", author="you")],
                         issues_by_repo={"acme/checkout-api":
                                         [self.spec(7, "acme/checkout-api", author="djo19")]})
         out = attention.spec_issues(cli=cli, config={"specRepos": ["acme/checkout-api"]})
         self.assertEqual([i["ref"] for i in out["issues"]],
                          ["acme/shared-lib#10", "acme/checkout-api#7"])
-        self.assertEqual([i["author"] for i in out["issues"]], ["albertvila", "djo19"])
+        self.assertEqual([i["author"] for i in out["issues"]], ["you", "djo19"])
         self.assertEqual([i["watched"] for i in out["issues"]], [False, True])
         # The two searches run at once, so which answers first is not the test:
         # each asks for what it should, and mine still wins the merge above.
@@ -1227,7 +1227,7 @@ class OpenSessions(unittest.TestCase):
         """You are the "You" row, so the roster below is everyone else — a roster
         that names you twice is a roster you stop reading. My login rides along
         because the avatar on that row has to come from somewhere."""
-        listing = [{"login": "albertvila"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
+        listing = [{"login": "you"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
 
         class Live:
             def json(self, command, args):
@@ -1237,8 +1237,8 @@ class OpenSessions(unittest.TestCase):
 
         with mock.patch.object(attention, "LIVE", Live()):
             out = attention.team_members(config={"stalkTeams": ["squad-platform"], "stalker": True},
-                                            me="albertvila")
-        self.assertEqual(out["you"], {"login": "albertvila"})
+                                            me="you")
+        self.assertEqual(out["you"], {"login": "you"})
         self.assertEqual([p["login"] for p in out["people"]], ["teammate-one"])     # bots and me left out
         self.assertEqual(out["people"][0]["name"], "Ada Lovelace")
 
