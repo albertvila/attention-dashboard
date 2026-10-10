@@ -12,6 +12,18 @@ ordering is source-agnostic, so a new source is an adapter, not a rewrite.
 The JSON snapshot (--json, /attention.json) is the contract other surfaces
 render: schema tag, generatedAt, the tiered view, and what changed since the
 previous snapshot. Diffing happens here so no consumer re-implements it.
+
+What lives where, in file order — the banners below say the same thing at the
+seam, this is the index:
+
+  settled vocabulary      states, tiers and their labels (the source-agnostic part)
+  the pure seam           items -> view model: clusters, cards, tiers (no I/O at all)
+  the snapshot contract   schema, producer stamp, payload, the diff
+  adapters                recorded gh / twg JSON -> normalized items
+  live collection         the CLI seam, and what each source reads
+  sessions and specs      read beside the snapshot, never stored in it
+  comments and files      what a card's thread says, config, parking, snapshot I/O
+  HTTP                    the routes, and the one that is a POST
 """
 
 import argparse
@@ -74,7 +86,7 @@ def _state(key):
 SCHEMA_VERSION = 1
 # Bumped by hand for human-meaningful changes; the code hash below is the
 # automatic "which build wrote this file" witness a stale process is caught by.
-PRODUCER_VERSION = 4
+PRODUCER_VERSION = 5
 _PRODUCER_CODE = None
 
 
@@ -124,9 +136,6 @@ JIRA_FIELDS = ("summary,status,issuetype,description,updated,created,project,ass
 JIRA_OPEN_FIELDS = JIRA_FIELDS + ",comment"
 # statuscategorychangeddate = when the ticket entered the Done category.
 JIRA_CLOSED_FIELDS = JIRA_FIELDS + ",statuscategorychangeddate"
-# The inward text of the link type that holds a ticket up: the linked issue is
-# the blocker, and Jira hands back its status and summary with the link itself.
-JIRA_BLOCKED_BY = "is blocked by"
 # Fireline opens an alert ticket in the FIRE project and links it to the ticket
 # that owns the work ("Problem/Incident": the work ticket causes the alert).
 # The alert is the automation's copy of the incident, not the card.
@@ -739,80 +748,53 @@ def _issue_item(view, states, open_prs, link):
                  times={"updated": view.get("updatedAt"), "created": view.get("createdAt")})
 
 
-def _jira_blockers(row):
-    """The tickets this one is blocked by, as the card shows them: key, its own
-    status, type and summary. All of it arrives with the link, so naming a
-    blocker costs no second call."""
-    out = []
-    for link in row.get("issuelinks") or []:
-        if JIRA_BLOCKED_BY not in ((link.get("type") or {}).get("inward") or "").lower():
-            continue
-        issue = link.get("inwardIssue") or {}
-        key = issue.get("key")
-        if not key:
-            continue
-        fields = issue.get("fields") or {}
-        status = fields.get("status") or {}
-        out.append({
-            "key": key,
-            "url": JIRA_BASE + key,
+def _is_block(link):
+    """A dependency, not sameness: Jira's own block link, in either direction. The
+    wording differs per instance ("is blocked by", "Blocked by"), so the test is on
+    the word, in one place, for every reader of a link."""
+    kind = link.get("type") or {}
+    return "block" in ((kind.get("inward") or "") + " " + (kind.get("outward") or "")).lower()
+
+
+def _link_side(issue):
+    """One linked ticket as a card names it: key, its own type, status and summary,
+    all of it handed back with the link itself, so naming it costs no second call."""
+    key = issue.get("key")
+    fields = issue.get("fields") or {}
+    status = fields.get("status") or {}
+    return {"key": key, "url": JIRA_BASE + key,
             "status": status.get("name", ""),
             "status_category": (status.get("statusCategory") or {}).get("name", ""),
             "type": (fields.get("issuetype") or {}).get("name", ""),
-            "summary": fields.get("summary", ""),
-        })
-    return out
+            "summary": fields.get("summary", "")}
 
 
-def _jira_links(row):
-    """The other side of every Jira link that is not a dependency, named the way
-    a blocker is: key, its own type, status and summary, all of it handed back
-    with the link itself. A blocking link is not here — it is `blocked_by`."""
-    out = []
-    seen = set()
+def _jira_links_of(row):
+    """One walk of a ticket's links, three answers: what Jira says holds it up
+    (`blocked_by`), the tickets the card names (`linked`, open ones first), and the
+    bare keys two tickets cluster by (`links`). One walk because all three read the
+    same thing and must agree on what a block is — the blocker is the inward side,
+    and a link that is a dependency is never also a link or a cluster key."""
+    blocked_by, linked, keys, seen = [], [], [], set()
     for link in row.get("issuelinks") or []:
-        kind = link.get("type") or {}
-        if "block" in (kind.get("inward") or "").lower() \
-                or "block" in (kind.get("outward") or "").lower():
+        if _is_block(link):
+            issue = link.get("inwardIssue") or {}
+            if issue.get("key"):
+                blocked_by.append(_link_side(issue))
             continue
         for side in ("inwardIssue", "outwardIssue"):
             issue = link.get(side) or {}
             key = issue.get("key")
-            # two link types to the same ticket is still one line on the card.
-            if not key or key in seen:
+            if not key:
+                continue
+            keys.append(key)
+            if key in seen:
                 continue
             seen.add(key)
-            fields = issue.get("fields") or {}
-            status = fields.get("status") or {}
-            out.append({
-                "key": key,
-                "url": JIRA_BASE + key,
-                "status": status.get("name", ""),
-                "status_category": (status.get("statusCategory") or {}).get("name", ""),
-                "type": (fields.get("issuetype") or {}).get("name", ""),
-                "summary": fields.get("summary", ""),
-            })
+            linked.append(_link_side(issue))
     # still open first: that one is the wait, a finished one is history.
-    out.sort(key=lambda l: l["status_category"] == "Done")
-    return out
-
-
-def _jira_linked_keys(row):
-    """The other tickets a Jira link joins to this one, either direction: a link
-    is how Jira says two tickets are the same work (Fireline's alert to the
-    ticket that caused it). A blocking link is a dependency, not sameness — the
-    blocker stays its own card and rides in this one's blocked_by line."""
-    out = []
-    for link in row.get("issuelinks") or []:
-        kind = link.get("type") or {}
-        if "block" in (kind.get("inward") or "").lower() \
-                or "block" in (kind.get("outward") or "").lower():
-            continue
-        for side in ("inwardIssue", "outwardIssue"):
-            key = (link.get(side) or {}).get("key")
-            if key:
-                out.append(key)
-    return out
+    linked.sort(key=lambda l: l["status_category"] == "Done")
+    return blocked_by, linked, keys
 
 
 def _jira_comment_count(row):
@@ -824,18 +806,18 @@ def _jira_comment_count(row):
     return comment.get("total") if isinstance(comment, dict) else None
 
 
-def _jira_item(row, *, states, detail="", facts=(), blocked_by=(), updated=None):
+def _jira_item(row, *, states, detail="", facts=(), updated=None):
     """A Jira row -> the item every Jira card shares. The two callers differ only
     in what they say about the ticket: its states, its detail line, its facts, and
     which stamp counts as `updated`."""
     desc = row.get("description")
     key = row["key"]
+    blocked_by, linked, jira_keys = _jira_links_of(row)
     return _item(
         "JIRA", source="jira", ref=key, title=row.get("summary", ""),
         url=row.get("url") or JIRA_BASE + key,
-        links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc))
-              + _jira_linked_keys(row),
-        blocked_by=blocked_by, linked=_jira_links(row), states=states, detail=detail, facts=facts,
+        links=_github_links_in(desc if isinstance(desc, str) else json.dumps(desc)) + jira_keys,
+        blocked_by=blocked_by, linked=linked, states=states, detail=detail, facts=facts,
         comments=_jira_comment_count(row),
         times={"updated": _iso(updated or row.get("updated")), "created": _iso(row.get("created"))})
 
@@ -862,8 +844,7 @@ def items_from_jira(rows):
                {"Done": "ok", "In Progress": "warn"}.get(category, "waiting")
         items.append(_jira_item(
             row, states=[state], detail=itype.get("name", ""),
-            facts=[{"label": status_name, "tone": tone}] if status_name else [],
-            blocked_by=_jira_blockers(row)))
+            facts=[{"label": status_name, "tone": tone}] if status_name else []))
     return items
 
 
@@ -1273,11 +1254,32 @@ def _write_json(path, data):
     _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
+def _instant(text):
+    """A stamp as an instant, or None when it is not one. The parking files are
+    hand-editable, so a value that is not a time is not an error: it is nothing."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        at = _parsed(text)
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
 def load_snoozes(path=None, now=None):
-    """{key: until-ISO}, expired entries dropped."""
-    stamp = _iso_utc(now or datetime.now(timezone.utc))
-    return {k: v for k, v in _read_json(path or snooze_path()).items()
-            if isinstance(v, str) and v > stamp}
+    """{key: until-ISO}, expired entries dropped. Compared as instants, never as
+    text: a stamp written by hand with a local offset sorts after a UTC one, and
+    would otherwise never expire."""
+    stamp = now if isinstance(now, datetime) else _instant(now)
+    stamp = stamp or datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    out = {}
+    for key, until in (_read_json(path or snooze_path()) or {}).items():
+        at = _instant(until)
+        if at is not None and at > stamp:
+            out[key] = until
+    return out
 
 
 def load_acks(path=None):
@@ -1400,6 +1402,7 @@ COMMENTS = {}           # key -> (lastChangedAt, [comment])
 COMMENT_MAX = 3         # the newest few: all a "something landed" line needs
 COMMENT_CHARS = 360     # one line's worth, never a wall
 _JIRA_ME = []           # my own account id, once
+PARK_LOCK = threading.Lock()   # one parking write at a time, read included
 
 
 def adf_text(body):
@@ -1429,15 +1432,19 @@ def adf_text(body):
 
 
 def _jira_me(cli=None):
-    """My own Jira account id, so a comment I wrote is not news to me."""
+    """My own Jira account id, so a comment I wrote is not news to me. A read that
+    fails is not remembered: the next look tries again, rather than treating your
+    own comments as somebody else's for the life of the process."""
     if _JIRA_ME:
         return _JIRA_ME[0]
     try:
         found = (cli or LIVE).json("twg", ["whoami", "--output", "json", "--output-summary", "none"])
-        _JIRA_ME.append(((found.get("data") or {}).get("accountId") or ""))
     except Exception:
-        _JIRA_ME.append("")
-    return _JIRA_ME[0]
+        return ""
+    account = (found.get("data") or {}).get("accountId") or ""
+    if account:
+        _JIRA_ME.append(account)
+    return account
 
 
 def jira_comments(key, cli=None):
@@ -1504,6 +1511,10 @@ def live_comments(keys, cli=None):
             continue
         COMMENTS[key] = (stamp, found)
         out[key] = found
+    # Bounded by the queue: a key the snapshot no longer carries is a card that
+    # left, and its thread is not coming back in this process's life.
+    for key in [k for k in COMMENTS if k not in stamps]:
+        del COMMENTS[key]
     return out
 
 
@@ -1602,14 +1613,19 @@ def _park(key, value, path, data):
 def write_ack(key, at=None, path=None):
     """Acknowledge one card (`at` defaults to now) or clear it when falsy."""
     path = path or ack_path()
-    return _park(key, at, path, load_acks(path))
+    with PARK_LOCK:
+        return _park(key, at, path, load_acks(path))
 
 
 def write_snooze(key, until=None, path=None, now=None):
     """Sleep one card until `until` (ISO), or wake it when `until` is falsy.
-    Expired entries fall out here rather than accumulating forever."""
+    Expired entries fall out here rather than accumulating forever. One at a
+    time: reading the file and writing it back is a pair, and two clicks that
+    overlap would otherwise each write back what it read before the other's key
+    was in it — silently losing one. """
     path = path or snooze_path()
-    return _park(key, until, path, load_snoozes(path, now))
+    with PARK_LOCK:
+        return _park(key, until, path, load_snoozes(path, now))
 
 
 def load_previous(path):
@@ -1889,13 +1905,20 @@ def team_members(config=None, me=None):
             person = people.setdefault(login, {"login": login, "name": login, "teams": []})
             if slug not in person["teams"]:
                 person["teams"].append(slug)
-    def face(login):
+    if people:
+        # One query for every face. `users/<login>` per member was one call each,
+        # and a look happens on focus and on every visible sweep, so a forty-person
+        # team spent forty calls per look out of the same rate limit the queue's
+        # own searches come from.
+        query = "query { " + " ".join(
+            f'n{i}: user(login: {json.dumps(login)}) {{ login name }}'
+            for i, login in enumerate(people)) + " }"
         try:
-            user = LIVE.json("gh", ["api", f"users/{login}"])
-            people[login]["name"] = user.get("name") or login
+            data = (LIVE.graphql(query) or {}).get("data") or {}
+            for i, login in enumerate(people):
+                people[login]["name"] = (data.get("n%d" % i) or {}).get("name") or login
         except CliError:
-            pass
-    _each(face, people)
+            pass                 # the logins stand in as the names
     return {"you": {"login": me},
             "people": sorted(people.values(), key=lambda p: p["name"].lower())}
 
@@ -2009,7 +2032,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_body(self):
         try:
-            size = int(self.headers.get("Content-Length") or 0)
+            # Every body here is a few hundred bytes of JSON. Cap it, and floor
+            # it at zero: a negative length means "read to the end of the
+            # connection", which parks this handler's thread until the sender
+            # goes away.
+            size = max(0, min(int(self.headers.get("Content-Length") or 0), 64 * 1024))
             return json.loads(self.rfile.read(size) or b"{}")
         except (TypeError, ValueError):
             return {}

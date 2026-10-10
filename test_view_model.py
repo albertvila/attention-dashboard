@@ -12,6 +12,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import threading
 import unittest
 from unittest import mock
@@ -1230,10 +1231,15 @@ class OpenSessions(unittest.TestCase):
         listing = [{"login": "you"}, {"login": "teammate-one"}, {"login": "lm-sec-github"}]
 
         class Live:
+            """The roster read: the team listing, then one query for the names."""
+
             def json(self, command, args):
                 if "teams/" in args[1]:
                     return listing
-                return {"name": "Ada Lovelace"}
+                raise AssertionError("a name read must be batched, not per member")
+
+            def graphql(self, query):
+                return {"data": {"n0": {"login": "ribugent", "name": "Ada Lovelace"}}}
 
         with mock.patch.object(attention, "LIVE", Live()):
             out = attention.team_members(config={"stalkTeams": ["squad-platform"], "stalker": True},
@@ -1285,6 +1291,60 @@ class OpenSessions(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertFalse(out["raised"])
         self.assertEqual(out["ran"], "herdr tab focus wN:t1 && open -a Herdr")
+
+
+class TheServedSnapshot(unittest.TestCase):
+    """The server serves the file, not a memory of it: the CLI, another collector,
+    or a second surface can rewrite it behind us, and a stale memory would be
+    served forever — the failure the producer stamp exists to catch."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "attention.json")
+        patcher = mock.patch.object(attention, "default_snapshot_path", lambda: self.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        attention.LAST_PAYLOAD = attention.LAST_MTIME = None
+        self.addCleanup(self.forget)
+
+    @staticmethod
+    def forget():
+        attention.LAST_PAYLOAD = attention.LAST_MTIME = None
+
+    def test_a_rewritten_file_wins_over_the_memory_of_it(self):
+        attention.write_snapshot({"generatedAt": "A"}, self.path)
+        self.assertEqual(attention.cached_payload()["generatedAt"], "A")
+        attention.write_snapshot({"generatedAt": "B"}, self.path)
+        os.utime(self.path, (time.time() + 5, time.time() + 5))     # a distinct mtime
+        self.assertEqual(attention.cached_payload()["generatedAt"], "B")
+
+    def test_a_cold_refresh_diffs_against_the_file_not_against_nothing(self):
+        """A fresh process has no memory. Without the warm start the first refresh
+        after a restart marks every card new, and where things were is gone."""
+        earlier = {"schema": 1, "generatedAt": "2026-10-10T08:00:00Z", "tiers": [], "drafts": [],
+                   "closed": [], "changes": {"previousAt": None, "summary": {}, "items": {}, "gone": []}}
+        attention.write_snapshot(earlier, self.path)
+        self.forget()
+        seen = {}
+
+        def collect(previous=None):
+            seen["previous"] = previous
+            return dict(earlier, generatedAt="2026-10-10T09:00:00Z")
+
+        with mock.patch.object(attention, "collect_payload", collect):
+            out = attention.refresh()
+        self.assertEqual(seen["previous"]["generatedAt"], "2026-10-10T08:00:00Z")
+        self.assertEqual(out["generatedAt"], "2026-10-10T09:00:00Z")
+        with open(self.path) as fh:
+            self.assertEqual(json.load(fh)["generatedAt"], "2026-10-10T09:00:00Z")
+
+    def test_no_file_at_all_is_one_collection_not_one_per_read(self):
+        collected = []
+        with mock.patch.object(attention, "collect_payload",
+                               lambda previous=None: collected.append(previous) or {"generatedAt": "C"}):
+            self.assertEqual(attention.cached_payload()["generatedAt"], "C")
+            self.assertEqual(attention.cached_payload()["generatedAt"], "C")
+        self.assertEqual(collected, [None])          # the cold start happens once
 
 
 class Snoozes(unittest.TestCase):

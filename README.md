@@ -202,13 +202,15 @@ the Jira status as its fact. A ticket that has not started stays in Needs, and
 
 ## Blocked by (Jira)
 
-A ticket whose Jira link type says `is blocked by` carries that blocker as
-`blocked_by`, and the card renders it on its own line: the key as a link, the
-blocker's type, its **status** and its summary — so "what am I waiting for" is
+A ticket a Jira **block link** holds up carries that blocker as `blocked_by`,
+and the card renders it on its own line: the key as a link,
+the blocker's type, its **status** and its summary — so "what am I waiting for" is
 readable without opening Jira, and a blocker that has gone Done reads green
 instead of amber. Jira hands all of it back with the link itself, so naming a
 blocker costs no second call. The other direction (this card *blocks* another)
-is not a block on this card and is not shown.
+is not a block on this card and is not shown. The test is on the word "block" in
+the link type, in one place, because instances word it differently (`is blocked
+by`, `Blocked by`).
 
 Every other Jira link is named the same way, in `linked`: the ticket you raised
 with another team and are waiting on, a ticket of your own the incident also
@@ -225,12 +227,12 @@ A card you can act on says what it is asking for, in one sentence. Every line is
 evidence is what a rule reads, and the rule fires on what is there.
 
 Five kinds are free — the state, the facts, the linked items, the Jira links,
-the blockers, all of it already on the row. Three are reads: a ticket's
-**comments**, a PR's **review comments**, and the **transitions Jira allows**
+the blockers, all of it already on the row. Two are reads: a ticket's
+**comments**, and the **transitions Jira allows**
 from the current status. A read costs one call per card, is reused until the card
 has moved (`lastChangedAt` is the cache key), and a read that fails costs that
-one line, never the queue. Comments are read today; the other two kinds are named
-and silent — a rule that needs one is reported as waiting for it rather than
+one line, never the queue. Comments are read today; transitions is named and
+silent — a rule that needs it is reported as waiting for it rather than
 guessing, which is also how the board says "the answer would be in the comments".
 
 A comment from somebody else, newer than your last look, is the strongest thing a

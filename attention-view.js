@@ -96,7 +96,6 @@
     link: { label: 'the Jira links', free: true },
     blocker: { label: 'what Jira says holds it up', free: true },
     comment: { label: 'the Jira comments', free: false },
-    'review-comment': { label: 'the PR comments', free: false },
     transition: { label: 'the transitions Jira allows', free: false },
   };
   const NEXT_CLOSED = ['merged', 'closed', 'done'];
@@ -114,7 +113,6 @@
     for (const l of row.linked || []) ev.push({ kind: 'link', ref: l.key, status: l.status, category: l.status_category, type: l.type, at: '' });
     for (const b of row.blocked_by || []) ev.push({ kind: 'blocker', ref: b.key, status: b.status, category: b.status_category, at: '' });
     for (const c of x.comment || []) ev.push({ kind: 'comment', at: c.at, who: c.who, text: c.text });
-    for (const c of x['review-comment'] || []) ev.push({ kind: 'review-comment', at: c.at, who: c.who, text: c.text, ref: c.ref });
     for (const t of x.transition || []) ev.push({ kind: 'transition', name: t, at: '' });
     return ev;
   }
@@ -129,7 +127,7 @@
       openKids: kids.filter(isOpen), mergedKids: kids.filter(k => !isOpen(k)),
       openLinks: links.filter(l => isOpen(l)),
       openBlockers: ev.filter(e => e.kind === 'blocker' && e.category !== 'Done'),
-      humans: ev.filter(e => e.kind === 'comment' || e.kind === 'review-comment')
+      humans: ev.filter(e => e.kind === 'comment')
         .sort((a, b) => (a.at < b.at ? -1 : 1)),
       transitions: ev.filter(e => e.kind === 'transition').map(e => e.name),
     };

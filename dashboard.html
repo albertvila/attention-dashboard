@@ -305,7 +305,10 @@ async function load(isRefresh){
     reads.specs.then(backlog => {
       specsRead = true;
       specs = backlog.issues || []; specErrors = backlog.errors || [];
-      view = AttentionView.overlay(snap, {seenAt: viewing ? null : seenAt, snoozes, acks, specs});
+      // the comment read is evidence too: rebuilding without it would drop the
+      // lines a comment earned, and the sentence's count with them.
+      view = AttentionView.overlay(snap, {seenAt: viewing ? null : seenAt, snoozes, acks, specs,
+                                          reads: {comment: comments}});
       paintSpecs();
     });
     reads.sessions.then(live => {
@@ -562,8 +565,11 @@ function nextLineEl(it){
 const JIRA_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
 let comments = {};
 async function paintComments(){
-  const rows = view.tiers.flatMap(t => t.rows).filter(r => r.key);
-  const keys = [...new Set(rows.map(r => r.key).filter(k => JIRA_KEY.test(k)))];
+  // A card that left the board keeps its comments to itself: a ghost is history,
+  // and reading its thread is a call for a line nobody shows.
+  const live = view.tiers.flatMap(t => t.rows)
+    .filter(r => r.key && !(r.change && r.change.kind === 'gone'));
+  const keys = [...new Set(live.map(r => r.key).filter(k => JIRA_KEY.test(k)))];
   if(!keys.length) return;
   try{
     comments = await (await fetch('/comments?keys=' + keys.join(','))).json();
